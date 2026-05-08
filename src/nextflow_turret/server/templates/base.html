@@ -108,6 +108,10 @@
     <a href="/docs" target="_blank">API Docs</a>
   </nav>
   <div class="spacer"></div>
+  {% if current_user %}
+  <span class="muted" style="font-size:13px;">{{ current_user.username }}</span>
+  <a href="/auth/logout" style="font-size:13px;color:var(--text-dim);">Sign out</a>
+  {% endif %}
 </div>
 <div class="main">
 {% block content %}{% endblock %}

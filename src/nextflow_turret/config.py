@@ -21,6 +21,21 @@ Example ``turret.toml``::
     nextflow        = "/opt/nextflow/nextflow"
     work_dir        = "/scratch/nf-work"
     default_profile = "slurm"
+
+    [auth]
+    mode           = "basic"           # "none" | "basic" | "oidc"
+    session_secret = "change-me"       # used to sign session cookies
+
+    [auth.basic]
+    username      = "admin"
+    password_hash = "$2b$12$..."       # use `turret hash-password` to generate
+
+    [auth.oidc]
+    client_id     = "..."
+    client_secret = "..."
+    discovery_url = "https://accounts.google.com/.well-known/openid-configuration"
+    redirect_uri  = "http://localhost:8000/auth/callback"  # optional; auto-detected
+    scopes        = ["openid", "email", "profile"]
 """
 from __future__ import annotations
 
@@ -29,7 +44,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-if sys.version_info >= (3, 11):
+from .auth import AuthConfig, AuthMode, BasicAuthConfig, OIDCConfig
+
+if sys.version_info >= (3, 11):  # noqa: E402  (after dataclass imports)
     import tomllib
 else:
     try:
@@ -63,6 +80,9 @@ class TurretConfig:
     nextflow:        str           = "nextflow"
     work_dir:        Optional[str] = None
     default_profile: Optional[str] = None
+
+    # [auth]
+    auth: AuthConfig = field(default_factory=AuthConfig)
 
     @property
     def tower_url(self) -> str:
@@ -116,5 +136,37 @@ def load_config(config_path: Optional[str] = None) -> tuple[TurretConfig, Option
     if "nextflow"        in launcher: cfg.nextflow        = str(launcher["nextflow"])
     if "work_dir"        in launcher: cfg.work_dir        = str(launcher["work_dir"])
     if "default_profile" in launcher: cfg.default_profile = str(launcher["default_profile"])
+
+    # auth section
+    auth_raw  = data.get("auth", {})
+    auth_mode = AuthMode(auth_raw.get("mode", "none"))
+    auth_secret = str(auth_raw.get("session_secret", ""))
+
+    basic_cfg: Optional[BasicAuthConfig] = None
+    oidc_cfg:  Optional[OIDCConfig]      = None
+
+    basic_raw = auth_raw.get("basic", {})
+    if basic_raw:
+        basic_cfg = BasicAuthConfig(
+            username      = str(basic_raw.get("username", "admin")),
+            password_hash = str(basic_raw.get("password_hash", "")),
+        )
+
+    oidc_raw = auth_raw.get("oidc", {})
+    if oidc_raw:
+        oidc_cfg = OIDCConfig(
+            client_id     = str(oidc_raw.get("client_id", "")),
+            client_secret = str(oidc_raw.get("client_secret", "")),
+            discovery_url = str(oidc_raw.get("discovery_url", "")),
+            redirect_uri  = oidc_raw.get("redirect_uri") or None,
+            scopes        = list(oidc_raw.get("scopes", ["openid", "email", "profile"])),
+        )
+
+    cfg.auth = AuthConfig(
+        mode           = auth_mode,
+        session_secret = auth_secret,
+        basic          = basic_cfg,
+        oidc           = oidc_cfg,
+    )
 
     return cfg, fpath

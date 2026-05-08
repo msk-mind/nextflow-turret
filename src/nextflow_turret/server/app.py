@@ -50,6 +50,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from ..auth import AuthConfig, AuthManager, AuthMiddleware, AuthMode
 from ..handlers import TowerRouter
 from ..db.store import RunStore
 from ..launcher.launcher import Launcher
@@ -59,7 +60,7 @@ from .registry import PersistentWorkflowRegistry
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
-def _make_templates() -> Jinja2Templates:
+def _make_templates(auth_mgr: "AuthManager") -> Jinja2Templates:
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
     def fmt_time(ts: Optional[float]) -> str:
@@ -68,6 +69,18 @@ def _make_templates() -> Jinja2Templates:
         return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     templates.env.filters["fmt_time"] = fmt_time
+
+    # Inject current_user into every template context
+    original_response = templates.TemplateResponse
+
+    def template_response_with_user(request, name_or_request, context=None, **kwargs):
+        # Support both old and new Jinja2/Starlette calling conventions
+        if context is None:
+            context = {}
+        context.setdefault("current_user", auth_mgr.get_user(request))
+        return original_response(request, name_or_request, context, **kwargs)
+
+    templates.TemplateResponse = template_response_with_user  # type: ignore[method-assign]
     return templates
 
 
@@ -222,6 +235,7 @@ def create_app(
     nextflow_bin:     str           = "nextflow",
     default_work_dir: Optional[str] = None,
     default_profile:  Optional[str] = None,
+    auth_config:      Optional[AuthConfig] = None,
 ) -> FastAPI:
     """Create and return the Nextflow Turret FastAPI application.
 
@@ -242,7 +256,13 @@ def create_app(
     default_profile:
         Default ``-profile`` for every launched pipeline (unless overridden
         per-launch).
+    auth_config:
+        Authentication configuration.  Pass ``None`` or ``AuthConfig()``
+        (mode=none) to disable auth entirely.
     """
+    if auth_config is None:
+        auth_config = AuthConfig()
+
     store     = RunStore(db_path)
     registry  = PersistentWorkflowRegistry(store)
     router    = TowerRouter(registry=registry)
@@ -253,13 +273,24 @@ def create_app(
         default_work_dir = default_work_dir,
         default_profile  = default_profile,
     )
-    templates = _make_templates()
+    auth_mgr   = AuthManager(auth_config)
+    templates  = _make_templates(auth_mgr)
 
     app = FastAPI(
         title="Nextflow Turret",
         description="Self-hosted Nextflow Tower / Seqera Platform replacement",
         version="0.1.0",
     )
+
+    # ------------------------------------------------------------------ #
+    # Session + Auth middleware                                            #
+    # ------------------------------------------------------------------ #
+    if auth_mgr.enabled:
+        from starlette.middleware.sessions import SessionMiddleware
+        # AuthMiddleware added first → becomes the *inner* middleware (runs last on request)
+        app.add_middleware(AuthMiddleware, auth_manager=auth_mgr)
+        # SessionMiddleware added last → becomes the *outermost* (runs first on request)
+        app.add_middleware(SessionMiddleware, secret_key=auth_config.session_secret)
 
     # ------------------------------------------------------------------ #
     # Tower trace endpoints                                                #
@@ -515,6 +546,73 @@ def create_app(
             raise HTTPException(404)
         launcher.cancel(launch_id)
         return RedirectResponse(url=f"/launches/{launch_id}", status_code=303)
+
+    # ------------------------------------------------------------------ #
+    # Auth routes                                                          #
+    # ------------------------------------------------------------------ #
+
+    @app.get("/auth/login", response_class=HTMLResponse, tags=["auth"], include_in_schema=False)
+    async def auth_login_form(request: Request, next: Optional[str] = None):
+        if auth_mgr.config.mode == AuthMode.OIDC:
+            # Redirect straight to provider
+            oauth   = auth_mgr.get_oauth()
+            cb_url  = auth_mgr.config.oidc.redirect_uri or str(request.url_for("auth_callback"))
+            return await oauth.oidc.authorize_redirect(request, cb_url, state=next or "/")
+        # Basic auth — show login form
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"next": next or "/", "error": None, "active_page": None},
+        )
+
+    @app.post("/auth/login", response_class=HTMLResponse, tags=["auth"], include_in_schema=False)
+    async def auth_login_submit(
+        request: Request,
+        username: str           = Form(...),
+        password: str           = Form(...),
+        next:     Optional[str] = Form(default="/"),
+    ):
+        user = auth_mgr.verify_basic_credentials(username, password)
+        if user is None:
+            return templates.TemplateResponse(
+                request,
+                "login.html",
+                {"next": next or "/", "error": "Invalid username or password", "active_page": None},
+                status_code=401,
+            )
+        auth_mgr.set_user(request, user)
+        return RedirectResponse(next or "/", status_code=303)
+
+    @app.get("/auth/callback", tags=["auth"], include_in_schema=False)
+    async def auth_callback(request: Request):
+        """OIDC authorization code callback."""
+        if auth_mgr.config.mode != AuthMode.OIDC:
+            raise HTTPException(404)
+        oauth  = auth_mgr.get_oauth()
+        token  = await oauth.oidc.authorize_access_token(request)
+        claims = token.get("userinfo") or token.get("id_token_claims") or {}
+        user   = {
+            "username":    claims.get("email") or claims.get("sub", "unknown"),
+            "email":       claims.get("email"),
+            "name":        claims.get("name"),
+            "auth_method": "oidc",
+        }
+        auth_mgr.set_user(request, user)
+        next_url = request.query_params.get("state") or "/"
+        return RedirectResponse(next_url, status_code=303)
+
+    @app.get("/auth/logout", tags=["auth"], include_in_schema=False)
+    async def auth_logout(request: Request):
+        auth_mgr.clear_user(request)
+        return RedirectResponse("/auth/login", status_code=303)
+
+    @app.get("/auth/whoami", tags=["auth"])
+    async def auth_whoami(request: Request):
+        """Return the currently authenticated user (or 401)."""
+        user = auth_mgr.get_user(request)
+        if user is None:
+            raise HTTPException(401, detail="Not authenticated")
+        return user
 
     return app
 

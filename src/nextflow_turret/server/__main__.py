@@ -17,11 +17,15 @@ Example
     # Explicit config file
     turret --config /etc/turret/prod.toml
 
+    # Generate a bcrypt password hash for [auth.basic]
+    turret hash-password mysecretpassword
+
 Then point Nextflow at it::
 
     nextflow run main.nf -with-tower http://localhost:8000 -name dispatcher_mybatch
 """
 import argparse
+import sys
 
 import uvicorn
 
@@ -32,6 +36,11 @@ _UNSET = object()  # sentinel to detect "user did not pass this flag"
 
 
 def main() -> None:
+    # --- Phase 0: handle utility sub-commands (no server needed) ----------
+    if len(sys.argv) >= 2 and sys.argv[1] == "hash-password":
+        _cmd_hash_password(sys.argv[2:])
+        return
+
     # --- Phase 1: peek at --config so we can load the file first ----------
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--config", default=None)
@@ -66,6 +75,9 @@ def main() -> None:
     if cfg_path:
         print(f"[turret] loaded config: {cfg_path}")
 
+    if cfg.auth.enabled:
+        print(f"[turret] auth mode: {cfg.auth.mode.value}")
+
     tower_url = f"http://{'localhost' if args.host == '0.0.0.0' else args.host}:{args.port}"
     app = create_app(
         db_path          = args.db,
@@ -74,8 +86,28 @@ def main() -> None:
         nextflow_bin     = args.nextflow,
         default_work_dir = args.work_dir,
         default_profile  = args.profile,
+        auth_config      = cfg.auth,
     )
     uvicorn.run(app, host=args.host, port=args.port)
+
+
+def _cmd_hash_password(argv: list[str]) -> None:
+    """``turret hash-password <password>`` — print a bcrypt hash."""
+    parser = argparse.ArgumentParser(
+        prog="turret hash-password",
+        description="Generate a bcrypt password hash for use in [auth.basic] password_hash",
+    )
+    parser.add_argument("password", nargs="?", default=None,
+                        help="Password to hash (prompted if omitted)")
+    args = parser.parse_args(argv)
+
+    password = args.password
+    if password is None:
+        import getpass
+        password = getpass.getpass("Password: ")
+
+    from ..auth import make_password_hash
+    print(make_password_hash(password))
 
 
 if __name__ == "__main__":
