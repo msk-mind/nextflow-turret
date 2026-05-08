@@ -37,12 +37,31 @@ pip install "nextflow-turret @ git+https://github.com/msk-mind/nextflow-turret.g
 # Start the server (default: http://0.0.0.0:8000, DB: turret.db)
 turret
 
-# Or with custom options
+# Or with explicit options (always override config file)
 turret --host 127.0.0.1 --port 9000 --db /data/turret.db --log-dir /data/logs
 
 # Or via Python
 python -m nextflow_turret.server --port 9000
 ```
+
+### Config file
+
+Create a `turret.toml` in the working directory (or `~/.config/turret/config.toml` for user-level defaults). CLI flags always win over config values.
+
+```toml
+[server]
+host    = "0.0.0.0"
+port    = 8000
+db      = "/data/turret.db"
+log_dir = "/data/turret-logs"
+
+[launcher]
+nextflow        = "/opt/nextflow/nextflow"
+work_dir        = "/scratch/nf-work"
+default_profile = "slurm"
+```
+
+A fully-commented template is at [`turret.toml.example`](turret.toml.example).
 
 Then point Nextflow at it:
 

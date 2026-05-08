@@ -111,10 +111,12 @@ def _enrich_run(state: dict) -> dict:
 
 
 def create_app(
-    db_path:     str | Path = "turret.db",
-    tower_url:   str        = "http://localhost:8000",
-    log_dir:     str | Path = "turret-logs",
-    nextflow_bin: str       = "nextflow",
+    db_path:          str | Path    = "turret.db",
+    tower_url:        str           = "http://localhost:8000",
+    log_dir:          str | Path    = "turret-logs",
+    nextflow_bin:     str           = "nextflow",
+    default_work_dir: Optional[str] = None,
+    default_profile:  Optional[str] = None,
 ) -> FastAPI:
     """Create and return the Nextflow Turret FastAPI application.
 
@@ -129,14 +131,22 @@ def create_app(
         Directory for per-launch log files.
     nextflow_bin:
         Path to the ``nextflow`` executable.
+    default_work_dir:
+        Default ``-work-dir`` for every launched pipeline (unless overridden
+        per-launch).
+    default_profile:
+        Default ``-profile`` for every launched pipeline (unless overridden
+        per-launch).
     """
     store     = RunStore(db_path)
     registry  = PersistentWorkflowRegistry(store)
     router    = TowerRouter(registry=registry)
     launcher  = Launcher(
-        tower_url=tower_url,
-        log_dir=log_dir,
-        nextflow_bin=nextflow_bin,
+        tower_url        = tower_url,
+        log_dir          = log_dir,
+        nextflow_bin     = nextflow_bin,
+        default_work_dir = default_work_dir,
+        default_profile  = default_profile,
     )
     templates = _make_templates()
 

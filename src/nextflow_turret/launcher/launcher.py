@@ -104,15 +104,19 @@ class Launcher:
 
     def __init__(
         self,
-        tower_url: str = "http://localhost:8000",
-        log_dir: str | Path = "turret-logs",
-        nextflow_bin: str = "nextflow",
+        tower_url:        str           = "http://localhost:8000",
+        log_dir:          str | Path    = "turret-logs",
+        nextflow_bin:     str           = "nextflow",
+        default_work_dir: Optional[str] = None,
+        default_profile:  Optional[str] = None,
     ) -> None:
-        self._tower_url   = tower_url
-        self._log_dir     = Path(log_dir)
-        self._nextflow    = nextflow_bin
-        self._lock        = threading.Lock()
-        self._records:    dict[str, LaunchRecord] = {}
+        self._tower_url       = tower_url
+        self._log_dir         = Path(log_dir)
+        self._nextflow        = nextflow_bin
+        self._default_work_dir = default_work_dir
+        self._default_profile  = default_profile
+        self._lock            = threading.Lock()
+        self._records:        dict[str, LaunchRecord] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -128,18 +132,25 @@ class Launcher:
         run_name: Optional[str] = None,
         extra_args: Optional[list[str]] = None,
     ) -> str:
-        """Submit a pipeline run.  Returns the *launch_id*."""
+        """Submit a pipeline run.  Returns the *launch_id*.
+
+        *profile* and *work_dir* fall back to the launcher-level defaults
+        (``default_profile`` / ``default_work_dir``) when not supplied.
+        """
         launch_id = str(uuid.uuid4())
         run_name  = run_name or f"dispatcher_{launch_id}"
         log_path  = str(self._log_dir / f"{launch_id}.log")
+
+        resolved_profile  = profile  if profile  is not None else self._default_profile
+        resolved_work_dir = work_dir if work_dir is not None else self._default_work_dir
 
         record = LaunchRecord(
             launch_id    = launch_id,
             pipeline     = pipeline,
             revision     = revision,
             params       = params or {},
-            profile      = profile,
-            work_dir     = work_dir,
+            profile      = resolved_profile,
+            work_dir     = resolved_work_dir,
             run_name     = run_name,
             status       = LaunchStatus.PENDING,
             pid          = None,

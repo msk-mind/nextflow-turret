@@ -1,0 +1,17 @@
+# turret.toml — Nextflow Turret configuration
+#
+# This file is read automatically when present in the current working directory.
+# A user-level config can also be placed at ~/.config/turret/config.toml.
+# All values are optional; commented-out entries show the built-in defaults.
+# CLI flags (e.g. --port 9000) always override config-file values.
+
+[server]
+# host    = "0.0.0.0"    # bind address  (0.0.0.0 = all interfaces)
+# port    = 8000          # HTTP port
+# db      = "turret.db"  # SQLite database path
+# log_dir = "turret-logs" # directory for per-launch .log files
+
+[launcher]
+# nextflow        = "nextflow"   # path to the nextflow executable
+# work_dir        = ""           # default -work-dir for every launched pipeline
+# default_profile = ""           # default -profile  for every launched pipeline

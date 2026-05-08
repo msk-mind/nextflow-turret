@@ -1,14 +1,21 @@
 """Entry point: ``python -m nextflow_turret.server``
 
+Config is read from ``turret.toml`` (current dir) or
+``~/.config/turret/config.toml`` (user dir).  CLI flags always override
+config-file values.
+
 Example
 -------
 ::
 
-    # Start on default port 8000 with a local SQLite database
-    python -m nextflow_turret.server
+    # Start with defaults (reads turret.toml if present)
+    turret
 
-    # Custom host/port/db
-    python -m nextflow_turret.server --host 127.0.0.1 --port 9000 --db /data/turret.db
+    # Override specific values
+    turret --host 127.0.0.1 --port 9000 --db /data/turret.db
+
+    # Explicit config file
+    turret --config /etc/turret/prod.toml
 
 Then point Nextflow at it::
 
@@ -18,30 +25,59 @@ import argparse
 
 import uvicorn
 
+from ..config import load_config
 from .app import create_app
+
+_UNSET = object()  # sentinel to detect "user did not pass this flag"
 
 
 def main() -> None:
+    # --- Phase 1: peek at --config so we can load the file first ----------
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--config", default=None)
+    known, _ = pre.parse_known_args()
+
+    cfg, cfg_path = load_config(known.config)
+
+    # --- Phase 2: full parser with config-file values as defaults ---------
     parser = argparse.ArgumentParser(
-        prog="nextflow-turret",
+        prog="turret",
         description="Nextflow Turret — self-hosted Seqera Platform replacement",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--host",       default="0.0.0.0",              help="Bind host (default: 0.0.0.0)")
-    parser.add_argument("--port",       type=int, default=8000,          help="Bind port (default: 8000)")
-    parser.add_argument("--db",         default="turret.db",             help="SQLite database path")
-    parser.add_argument("--log-dir",    default="turret-logs",           help="Directory for launch log files")
-    parser.add_argument("--nextflow",   default="nextflow",              help="Path to nextflow executable")
+    parser.add_argument("--config",   default=None,          metavar="PATH",
+                        help="Path to turret.toml config file")
+    parser.add_argument("--host",     default=cfg.host,
+                        help="Bind host")
+    parser.add_argument("--port",     type=int, default=cfg.port,
+                        help="Bind port")
+    parser.add_argument("--db",       default=cfg.db,        metavar="PATH",
+                        help="SQLite database path")
+    parser.add_argument("--log-dir",  default=cfg.log_dir,   metavar="PATH",
+                        help="Directory for per-launch log files")
+    parser.add_argument("--nextflow", default=cfg.nextflow,  metavar="PATH",
+                        help="Path to nextflow executable")
+    parser.add_argument("--work-dir", default=cfg.work_dir,  metavar="PATH",
+                        help="Default work directory for launched pipelines")
+    parser.add_argument("--profile",  default=cfg.default_profile,
+                        help="Default Nextflow profile for launched pipelines")
     args = parser.parse_args()
 
-    tower_url = f"http://{args.host if args.host != '0.0.0.0' else 'localhost'}:{args.port}"
+    if cfg_path:
+        print(f"[turret] loaded config: {cfg_path}")
+
+    tower_url = f"http://{'localhost' if args.host == '0.0.0.0' else args.host}:{args.port}"
     app = create_app(
-        db_path=args.db,
-        tower_url=tower_url,
-        log_dir=args.log_dir,
-        nextflow_bin=args.nextflow,
+        db_path          = args.db,
+        tower_url        = tower_url,
+        log_dir          = args.log_dir,
+        nextflow_bin     = args.nextflow,
+        default_work_dir = args.work_dir,
+        default_profile  = args.profile,
     )
     uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
     main()
+
