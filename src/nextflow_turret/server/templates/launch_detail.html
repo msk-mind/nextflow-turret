@@ -11,6 +11,7 @@
     <span class="badge badge-{{ launch.status }}" style="font-size:13px;padding:4px 12px;">{{ launch.status }}</span>
     {% if launch.status in ('running', 'pending') %}
     <form method="POST" action="/launches/{{ launch.launch_id }}/cancel" onsubmit="return confirm('Cancel this launch?')">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="btn btn-danger btn-sm">Cancel</button>
     </form>
     {% endif %}

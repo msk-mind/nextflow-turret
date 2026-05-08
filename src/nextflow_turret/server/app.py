@@ -40,7 +40,9 @@ POST    /launches/{id}/cancel        Cancel a launch (HTML form)
 """
 from __future__ import annotations
 
+import collections
 import secrets
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -86,6 +88,81 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# ---------------------------------------------------------------------------
+# CSRF helpers
+# ---------------------------------------------------------------------------
+
+def _csrf_get_or_create(request: Request) -> str:
+    """Return (creating if needed) a CSRF token stored in the session."""
+    try:
+        token = request.session.get("_csrf")
+        if not token:
+            token = secrets.token_urlsafe(32)
+            request.session["_csrf"] = token
+        return token
+    except AssertionError:
+        # SessionMiddleware not installed (auth disabled) — no CSRF needed
+        return ""
+
+
+def _csrf_validate(request: Request, form_token: Optional[str]) -> None:
+    """Raise HTTPException(403) if the CSRF token is missing or invalid.
+
+    Only enforced when SessionMiddleware is active (i.e. auth is enabled).
+    """
+    try:
+        expected = request.session.get("_csrf")
+    except AssertionError:
+        return  # no session middleware → auth disabled → skip CSRF check
+    if not expected or not form_token or not secrets.compare_digest(expected, form_token):
+        raise HTTPException(403, detail="CSRF check failed")
+
+
+# ---------------------------------------------------------------------------
+# Login rate limiter
+# ---------------------------------------------------------------------------
+
+class _LoginRateLimiter:
+    """Simple in-memory sliding-window rate limiter for login attempts.
+
+    Keyed by IP address.  After *max_attempts* failures within *window* seconds
+    the IP is blocked until the window rolls forward.  Successful logins clear
+    the counter for that IP.
+    """
+
+    def __init__(self, max_attempts: int = 10, window_seconds: int = 60) -> None:
+        self._max    = max_attempts
+        self._window = window_seconds
+        self._lock   = threading.Lock()
+        self._log: dict[str, collections.deque] = {}
+
+    def _client_key(self, request: Request) -> str:
+        return request.client.host if request.client else "unknown"
+
+    def check_and_record(self, request: Request) -> bool:
+        """Return True if the request is allowed; False if rate-limited."""
+        key = self._client_key(request)
+        now = time.time()
+        with self._lock:
+            dq = self._log.setdefault(key, collections.deque())
+            # Drop timestamps outside the window
+            while dq and dq[0] < now - self._window:
+                dq.popleft()
+            if len(dq) >= self._max:
+                return False
+            dq.append(now)
+        return True
+
+    def reset(self, request: Request) -> None:
+        """Clear the counter for this IP (call on successful login)."""
+        key = self._client_key(request)
+        with self._lock:
+            self._log.pop(key, None)
+
+
+_login_rate_limiter = _LoginRateLimiter(max_attempts=10, window_seconds=60)
+
+
 def _make_templates(auth_mgr: "AuthManager") -> Jinja2Templates:
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
@@ -96,7 +173,7 @@ def _make_templates(auth_mgr: "AuthManager") -> Jinja2Templates:
 
     templates.env.filters["fmt_time"] = fmt_time
 
-    # Inject current_user into every template context
+    # Inject current_user and csrf_token into every template context
     original_response = templates.TemplateResponse
 
     def template_response_with_user(request, name_or_request, context=None, **kwargs):
@@ -104,6 +181,7 @@ def _make_templates(auth_mgr: "AuthManager") -> Jinja2Templates:
         if context is None:
             context = {}
         context.setdefault("current_user", auth_mgr.get_user(request))
+        context.setdefault("csrf_token", _csrf_get_or_create(request))
         return original_response(request, name_or_request, context, **kwargs)
 
     templates.TemplateResponse = template_response_with_user  # type: ignore[method-assign]
@@ -488,13 +566,15 @@ def create_app(
     @app.post("/launch", response_class=HTMLResponse, tags=["ui"], include_in_schema=False)
     async def ui_launch_submit(
         request: Request,
-        pipeline:  str           = Form(...),
-        revision:  Optional[str] = Form(default=None),
-        profile:   Optional[str] = Form(default=None),
-        work_dir:  Optional[str] = Form(default=None),
-        run_name:  Optional[str] = Form(default=None),
-        params:    Optional[str] = Form(default=None),
+        pipeline:    str           = Form(...),
+        revision:    Optional[str] = Form(default=None),
+        profile:     Optional[str] = Form(default=None),
+        work_dir:    Optional[str] = Form(default=None),
+        run_name:    Optional[str] = Form(default=None),
+        params:      Optional[str] = Form(default=None),
+        csrf_token_field: Optional[str] = Form(default=None, alias="_csrf_token"),
     ):
+        _csrf_validate(request, csrf_token_field)
         form_data = {
             "pipeline": pipeline, "revision": revision,
             "profile": profile, "work_dir": work_dir,
@@ -598,7 +678,12 @@ def create_app(
         )
 
     @app.post("/launches/{launch_id}/cancel", tags=["ui"], include_in_schema=False)
-    async def ui_cancel_launch(launch_id: str):
+    async def ui_cancel_launch(
+        launch_id:   str,
+        request:     Request,
+        csrf_token_field: Optional[str] = Form(default=None, alias="_csrf_token"),
+    ):
+        _csrf_validate(request, csrf_token_field)
         record = launcher.get(launch_id)
         if record is None:
             raise HTTPException(404)
@@ -632,10 +717,21 @@ def create_app(
     @app.post("/auth/login", response_class=HTMLResponse, tags=["auth"], include_in_schema=False)
     async def auth_login_submit(
         request: Request,
-        username: str           = Form(...),
-        password: str           = Form(...),
-        next:     Optional[str] = Form(default="/"),
+        username:    str           = Form(...),
+        password:    str           = Form(...),
+        next:        Optional[str] = Form(default="/"),
+        csrf_token_field: Optional[str] = Form(default=None, alias="_csrf_token"),
     ):
+        # CSRF check
+        _csrf_validate(request, csrf_token_field)
+        # Rate limiting: check before verifying credentials
+        if not _login_rate_limiter.check_and_record(request):
+            return templates.TemplateResponse(
+                request,
+                "login.html",
+                {"next": safe_next_url(next, default="/"), "error": "Too many login attempts. Please wait and try again.", "active_page": None},
+                status_code=429,
+            )
         # Validate next before use
         destination = safe_next_url(next, default="/")
         user = auth_mgr.verify_basic_credentials(username, password)
@@ -646,6 +742,7 @@ def create_app(
                 {"next": destination, "error": "Invalid username or password", "active_page": None},
                 status_code=401,
             )
+        _login_rate_limiter.reset(request)
         auth_mgr.set_user(request, user)
         return RedirectResponse(destination, status_code=303)
 

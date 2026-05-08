@@ -58,6 +58,27 @@ def _basic_header(username: str = _USERNAME, password: str = _PASSWORD) -> dict:
     return {"Authorization": f"Basic {token}"}
 
 
+def _get_csrf_token(c: TestClient, url: str = "/auth/login") -> str:
+    """GET a page and extract the _csrf_token hidden field value."""
+    import re
+    r = c.get(url)
+    m = re.search(rb'name="_csrf_token"\s+value="([^"]+)"', r.content)
+    if m:
+        return m.group(1).decode()
+    # Fall back to empty string (auth disabled — no CSRF enforced)
+    return ""
+
+
+def _login(c: TestClient, username: str = _USERNAME, password: str = _PASSWORD) -> None:
+    """Log in using the form, including a valid CSRF token."""
+    csrf = _get_csrf_token(c)
+    c.post(
+        "/auth/login",
+        data={"username": username, "password": password, "next": "/", "_csrf_token": csrf},
+        follow_redirects=False,
+    )
+
+
 # ---------------------------------------------------------------------------
 # mode=none (default)
 # ---------------------------------------------------------------------------
@@ -123,9 +144,10 @@ class TestBasicAuthUnauthenticated:
 class TestBasicAuthLoginForm:
     def test_good_credentials_set_session(self):
         c = _basic_app()
+        csrf = _get_csrf_token(c)
         r = c.post(
             "/auth/login",
-            data={"username": _USERNAME, "password": _PASSWORD, "next": "/"},
+            data={"username": _USERNAME, "password": _PASSWORD, "next": "/", "_csrf_token": csrf},
             follow_redirects=False,
         )
         assert r.status_code == 303
@@ -135,34 +157,26 @@ class TestBasicAuthLoginForm:
 
     def test_bad_credentials_return_401_form(self):
         c = _basic_app()
+        csrf = _get_csrf_token(c)
         r = c.post(
             "/auth/login",
-            data={"username": _USERNAME, "password": "wrongpassword", "next": "/"},
+            data={"username": _USERNAME, "password": "wrongpassword", "next": "/", "_csrf_token": csrf},
         )
         assert r.status_code == 401
         assert b"Invalid username or password" in r.content
 
     def test_after_login_ui_accessible(self):
         c = _basic_app()
-        # Log in
-        c.post(
-            "/auth/login",
-            data={"username": _USERNAME, "password": _PASSWORD, "next": "/"},
-        )
-        # Should now be able to access the dashboard
+        _login(c)
         r = c.get("/")
         assert r.status_code == 200
 
     def test_logout_clears_session(self):
         c = _basic_app()
-        # Log in first
-        c.post("/auth/login", data={"username": _USERNAME, "password": _PASSWORD, "next": "/"})
-        # Dashboard should be accessible
+        _login(c)
         assert c.get("/").status_code == 200
-        # Logout
         r = c.get("/auth/logout", follow_redirects=False)
         assert r.status_code in (302, 303)
-        # Now the dashboard should redirect again
         r2 = c.get("/", follow_redirects=False)
         assert r2.status_code == 302
         assert "/auth/login" in r2.headers["location"]
@@ -196,7 +210,7 @@ class TestBasicAuthHeader:
 class TestWhoami:
     def test_authenticated_user(self):
         c = _basic_app()
-        c.post("/auth/login", data={"username": _USERNAME, "password": _PASSWORD, "next": "/"})
+        _login(c)
         r = c.get("/auth/whoami")
         assert r.status_code == 200
         data = r.json()
@@ -314,10 +328,11 @@ class TestOpenRedirect:
     def test_login_next_redirect_is_sanitised(self):
         """GET /auth/login?next= with absolute URL must not redirect to evil host."""
         c = _basic_app()
+        csrf = _get_csrf_token(c)
         # Attempt open redirect
         r = c.post(
             "/auth/login",
-            data={"username": _USERNAME, "password": _PASSWORD, "next": "http://evil.com"},
+            data={"username": _USERNAME, "password": _PASSWORD, "next": "http://evil.com", "_csrf_token": csrf},
             follow_redirects=False,
         )
         # Must redirect to the default "/" (or some safe path), not to evil.com
@@ -378,17 +393,19 @@ class TestSecurityHeaders:
 class TestParamKeyValidation:
     """Invalid param keys must be rejected with 422."""
 
-    def _login(self, c: TestClient) -> None:
-        c.post("/auth/login", data={"username": _USERNAME, "password": _PASSWORD})
+    def _get_launch_csrf(self, c: TestClient) -> str:
+        return _get_csrf_token(c, "/launch")
 
     def test_valid_param_key_accepted(self):
         c = _basic_app()
-        self._login(c)
+        _login(c)
+        csrf = self._get_launch_csrf(c)
         r = c.post(
             "/launch",
             data={
                 "pipeline": "nf-core/test",
                 "params": '{"input": "s3://bucket/file.csv"}',
+                "_csrf_token": csrf,
             },
             follow_redirects=False,
         )
@@ -397,13 +414,15 @@ class TestParamKeyValidation:
 
     def test_invalid_param_key_rejected(self):
         c = _basic_app()
-        self._login(c)
+        _login(c)
+        csrf = self._get_launch_csrf(c)
         # Keys with shell metacharacters should be rejected
         r = c.post(
             "/launch",
             data={
                 "pipeline": "nf-core/test",
                 "params": '{"--inject; rm -rf /": "value"}',
+                "_csrf_token": csrf,
             },
             follow_redirects=False,
         )
@@ -411,11 +430,90 @@ class TestParamKeyValidation:
 
     def test_oversized_params_rejected(self):
         c = _basic_app()
-        self._login(c)
+        _login(c)
+        csrf = self._get_launch_csrf(c)
         huge_json = '{"k": "' + "x" * (101 * 1024) + '"}'
         r = c.post(
             "/launch",
-            data={"pipeline": "nf-core/test", "params": huge_json},
+            data={"pipeline": "nf-core/test", "params": huge_json, "_csrf_token": csrf},
             follow_redirects=False,
         )
         assert r.status_code == 422
+
+    def test_missing_csrf_token_rejected(self):
+        c = _basic_app()
+        _login(c)
+        r = c.post(
+            "/launch",
+            data={"pipeline": "nf-core/test", "params": "{}"},
+            follow_redirects=False,
+        )
+        # Missing CSRF token should return 403
+        assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Login rate limiting
+# ---------------------------------------------------------------------------
+
+class TestLoginRateLimit:
+    """Login endpoint must reject IPs after too many failed attempts."""
+
+    def test_rate_limited_after_excess_failures(self):
+        from nextflow_turret.server.app import _LoginRateLimiter
+        # Use a tight limiter: 3 attempts per 60 s
+        limiter = _LoginRateLimiter(max_attempts=3, window_seconds=60)
+
+        # Simulate requests (no real HTTP; test the limiter directly)
+        class _FakeRequest:
+            class client:
+                host = "10.0.0.1"
+
+        req = _FakeRequest()
+        assert limiter.check_and_record(req) is True   # attempt 1
+        assert limiter.check_and_record(req) is True   # attempt 2
+        assert limiter.check_and_record(req) is True   # attempt 3
+        assert limiter.check_and_record(req) is False  # blocked
+
+    def test_reset_clears_counter(self):
+        from nextflow_turret.server.app import _LoginRateLimiter
+        limiter = _LoginRateLimiter(max_attempts=2, window_seconds=60)
+
+        class _FakeRequest:
+            class client:
+                host = "10.0.0.2"
+
+        req = _FakeRequest()
+        limiter.check_and_record(req)
+        limiter.check_and_record(req)
+        assert limiter.check_and_record(req) is False  # blocked
+
+        limiter.reset(req)
+        assert limiter.check_and_record(req) is True   # cleared
+
+    def test_login_returns_429_when_rate_limited(self):
+        """End-to-end: after many bad logins, next attempt returns 429."""
+        from nextflow_turret.server import app as _app_module
+        from nextflow_turret.server.app import _LoginRateLimiter
+        original = _app_module._login_rate_limiter
+        try:
+            # Swap in a very tight limiter so we don't need 10 attempts
+            _app_module._login_rate_limiter = _LoginRateLimiter(max_attempts=2, window_seconds=60)
+
+            c = _basic_app()
+            csrf = _get_csrf_token(c)
+            # Two bad attempts — both within the limit (they count)
+            for _ in range(2):
+                c.post("/auth/login", data={"username": "bad", "password": "bad", "_csrf_token": csrf})
+                csrf = _get_csrf_token(c)  # refresh CSRF each time
+
+            # Third attempt should hit rate limit
+            r = c.post(
+                "/auth/login",
+                data={"username": "bad", "password": "bad", "_csrf_token": csrf},
+            )
+            assert r.status_code == 429
+            assert b"Too many login" in r.content
+        finally:
+            _app_module._login_rate_limiter = original
+

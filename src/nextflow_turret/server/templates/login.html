@@ -43,6 +43,7 @@
   {% endif %}
 
   <form method="POST" action="/auth/login">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="next" value="{{ next }}">
     <div class="form-row">
       <label for="username">Username</label>
