@@ -22,11 +22,14 @@ a web UI, and inspect logs — all without a cloud subscription.
 ## Installation
 
 ```bash
-# Full server (FastAPI + Jinja2 UI)
-pip install "git+https://github.com/msk-mind/nextflow-turret.git#egg=nextflow-turret[server]"
+# Full server (FastAPI + Jinja2 UI) — preferred
+uv add "nextflow-turret[server] @ git+https://github.com/msk-mind/nextflow-turret.git"
 
-# Library only (stdlib, no extra deps)
-pip install git+https://github.com/msk-mind/nextflow-turret.git
+# Or with pip
+pip install "nextflow-turret[server] @ git+https://github.com/msk-mind/nextflow-turret.git"
+
+# Library only (stdlib core, no extra deps)
+uv add "nextflow-turret @ git+https://github.com/msk-mind/nextflow-turret.git"
 ```
 
 ---
@@ -203,12 +206,13 @@ Key design decisions:
 ```bash
 git clone https://github.com/msk-mind/nextflow-turret.git
 cd nextflow-turret
-pip install -e ".[server,dev]"
 
-# Run all tests (149 tests: unit, integration, E2E)
-pytest
+# Run tests (uv installs deps automatically)
+uv run pytest
 
-# Run with coverage
+# Or sync into a venv and work interactively
+uv sync --extra server
+source .venv/bin/activate
 pytest --tb=short -q
 ```
 
