@@ -60,8 +60,8 @@
   .badge-failed    { background: rgba(224,80,80,0.15);  color: var(--danger); }
   .badge-cancelled { background: rgba(124,132,156,0.15);color: var(--muted); }
   .badge-pending   { background: rgba(240,160,48,0.15); color: var(--warning); }
-  .badge-stalled   { background: rgba(240,160,48,0.15); color: var(--warning); }
-  .badge-complete  { background: rgba(52,208,88,0.15);  color: var(--success); }
+  .badge-external  { background: rgba(124,132,156,0.15);color: var(--muted); }
+  .btn-secondary { background: var(--border); color: var(--text); }
 
   /* Forms */
   .form-row { margin-bottom: 16px; }
@@ -103,8 +103,7 @@
 <div class="topbar">
   <span class="logo">🎯 Nextflow Turret</span>
   <nav style="display:flex;gap:20px;">
-    <a href="/" class="{% if active_page == 'runs' %}active{% endif %}">Runs</a>
-    <a href="/launches" class="{% if active_page == 'launches' %}active{% endif %}">Launches</a>
+    <a href="/" class="{% if active_page == 'pipelines' %}active{% endif %}">Pipelines</a>
     <a href="/launch" class="{% if active_page == 'launch' %}active{% endif %}">+ New Launch</a>
     <a href="/docs" target="_blank">API Docs</a>
   </nav>

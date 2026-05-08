@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Pipelines{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Pipelines</h1>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span class="muted" style="font-size:13px;"><span class="refresh-dot"></span>Auto-refreshing</span>
+    <a href="/launch" class="btn btn-primary btn-sm">+ New Launch</a>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat">
+    <div class="stat-label">Total</div>
+    <div class="stat-value">{{ rows | length }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Running</div>
+    <div class="stat-value" style="color:var(--accent)">{{ n_running }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Succeeded</div>
+    <div class="stat-value" style="color:var(--success)">{{ n_complete }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Failed tasks</div>
+    <div class="stat-value" style="color:var(--danger)">{{ total_failed }}</div>
+  </div>
+</div>
+
+<div class="card">
+  {% if rows %}
+  <table>
+    <thead>
+      <tr>
+        <th>Pipeline</th>
+        <th>Run Name</th>
+        <th>Status</th>
+        <th>Progress</th>
+        <th>Tasks</th>
+        <th>Submitted</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <!-- Pipeline name + external badge -->
+        <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+            title="{{ row.pipeline }}">
+          <span class="mono">{{ row.pipeline }}</span>
+          {% if not row.has_launch %}
+            <span class="badge badge-external" style="margin-left:6px;vertical-align:middle;">external</span>
+          {% endif %}
+          {% if row.revision %}
+            <span class="muted" style="font-size:11px;margin-left:6px;">@{{ row.revision }}</span>
+          {% endif %}
+        </td>
+
+        <!-- Run name -->
+        <td class="mono" style="font-size:12px;color:var(--text-dim);">{{ row.run_name }}</td>
+
+        <!-- Unified status badge -->
+        <td>
+          {% set s = row.display_status %}
+          {% if s == 'complete' or s == 'succeeded' %}
+            <span class="badge badge-complete">Complete</span>
+          {% elif s == 'running' %}
+            <span class="badge badge-running">Running</span>
+          {% elif s == 'stalled' %}
+            <span class="badge badge-stalled">Stalled</span>
+          {% elif s == 'failed' %}
+            <span class="badge badge-failed">Failed</span>
+          {% elif s == 'cancelled' %}
+            <span class="badge badge-cancelled">Cancelled</span>
+          {% elif s == 'pending' %}
+            <span class="badge badge-pending">Pending</span>
+          {% else %}
+            <span class="badge badge-pending">{{ s }}</span>
+          {% endif %}
+        </td>
+
+        <!-- Progress bar (only if we have Tower trace data) -->
+        <td style="min-width:130px;">
+          {% if row.has_run and row.total > 0 %}
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="progress-wrap" style="flex:1;">
+              <div class="progress-bar" style="width:{{ row.pct }}%"></div>
+            </div>
+            <span class="muted" style="font-size:12px;width:32px;text-align:right;">{{ row.pct }}%</span>
+          </div>
+          {% elif row.display_status == 'complete' or row.display_status == 'succeeded' %}
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="progress-wrap" style="flex:1;">
+              <div class="progress-bar" style="width:100%"></div>
+            </div>
+            <span class="muted" style="font-size:12px;width:32px;text-align:right;">100%</span>
+          </div>
+          {% else %}
+          <span class="muted" style="font-size:12px;">—</span>
+          {% endif %}
+        </td>
+
+        <!-- Task counts -->
+        <td class="muted" style="font-size:12px;">
+          {% if row.total > 0 %}
+            ✓ {{ row.task_counts.get('succeeded', 0) }}
+            {% if row.task_counts.get('failed', 0) %}
+              &nbsp;<span style="color:var(--danger)">✗ {{ row.task_counts.get('failed', 0) }}</span>
+            {% endif %}
+            {% if row.task_counts.get('running', 0) %}
+              &nbsp;▶ {{ row.task_counts.get('running', 0) }}
+            {% endif %}
+            / {{ row.total }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+
+        <!-- Time -->
+        <td class="muted" style="font-size:12px;">{{ row.submitted_at | fmt_time }}</td>
+
+        <!-- Detail link -->
+        <td><a href="{{ row.detail_url }}">Details →</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">
+    <p style="font-size:16px;margin-bottom:8px;">No pipelines yet</p>
+    <p><a href="/launch">Launch your first pipeline →</a></p>
+    <p style="margin-top:12px;font-size:12px;">Or point Nextflow at this server with
+      <code style="font-family:var(--mono);color:var(--accent)">-with-tower http://&lt;host&gt;:8000</code>
+    </p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const hasActive = {{ 'true' if n_running > 0 else 'false' }};
+  if (hasActive) setTimeout(() => location.reload(), 5000);
+</script>
+{% endblock %}

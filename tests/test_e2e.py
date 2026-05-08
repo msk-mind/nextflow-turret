@@ -266,7 +266,7 @@ class TestMultiRunDashboard:
             assert f"dispatcher_dash{i}" in html
 
     def test_dashboard_empty_shows_placeholder(self, mem_client):
-        assert b"No runs yet" in mem_client.get("/").content
+        assert b"No pipelines yet" in mem_client.get("/").content
 
     def test_complete_badge_visible_for_finished_run(self, mem_client):
         wid = nf_trace_lifecycle(mem_client, "badge_run", n_tasks=3)
@@ -437,7 +437,7 @@ class TestLaunchUIFlow:
         assert "Log" in html
 
     def test_launches_empty_state_message(self, mem_client):
-        assert b"No launches yet" in mem_client.get("/launches").content
+        assert b"No pipelines yet" in mem_client.get("/launches").content
 
 
 # ---------------------------------------------------------------------------

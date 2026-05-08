@@ -111,6 +111,110 @@ def _enrich_run(state: dict) -> dict:
     return state
 
 
+def _build_pipeline_rows(launcher: "Launcher", registry: "PersistentWorkflowRegistry") -> list[dict]:
+    """Merge launch records and Tower trace runs into a unified dashboard list.
+
+    Each row has a ``display_status`` field and a ``detail_url`` for linking.
+    Launches without a matched run (e.g. still pending) and Tower runs that
+    were not submitted via Turret (external) are both included.
+    """
+    # Index enriched runs by run_name for O(1) lookup
+    runs_by_name: dict[str, dict] = {}
+    for run in registry.get_all():
+        runs_by_name[run["run_name"]] = _enrich_run(run)
+
+    rows: list[dict] = []
+    seen_run_names: set[str] = set()
+
+    for record in launcher.list_all():
+        launch = record.as_dict()
+        run    = runs_by_name.get(launch["run_name"])
+        seen_run_names.add(launch["run_name"])
+
+        row: dict = {
+            # launch identity
+            "launch_id":     launch["launch_id"],
+            "pipeline":      launch["pipeline"],
+            "revision":      launch.get("revision"),
+            "profile":       launch.get("profile"),
+            "launch_status": launch["status"],
+            "submitted_at":  launch["submitted_at"],
+            "has_launch":    True,
+            "has_run":       run is not None,
+            "detail_url":    f"/launches/{launch['launch_id']}",
+            # run defaults (overridden below when run exists)
+            "run_name":    launch["run_name"],
+            "workflow_id": None,
+            "batch_id":    None,
+            "complete":    launch["status"] in ("succeeded", "failed", "cancelled"),
+            "stalled":     False,
+            "pct":         100 if launch["status"] == "succeeded" else 0,
+            "done":        0,
+            "total":       0,
+            "task_counts": {},
+            "started_at":  launch.get("started_at"),
+            "failures":    [],
+        }
+
+        if run:
+            row.update({
+                "workflow_id": run["workflow_id"],
+                "batch_id":    run.get("batch_id"),
+                "complete":    run["complete"],
+                "stalled":     run.get("stalled", False),
+                "pct":         run["pct"],
+                "done":        run["done"],
+                "total":       run["total"],
+                "task_counts": run["task_counts"],
+                "started_at":  run.get("started_at") or launch.get("started_at"),
+                "failures":    run.get("failures", []),
+            })
+
+        # Unified status badge
+        if run:
+            if run["complete"]:
+                row["display_status"] = "complete"
+            elif run.get("stalled"):
+                row["display_status"] = "stalled"
+            else:
+                row["display_status"] = "running"
+        else:
+            row["display_status"] = launch["status"]  # pending / running / failed / cancelled
+
+        rows.append(row)
+
+    # External Tower runs (not submitted via Turret)
+    for run_name, run in runs_by_name.items():
+        if run_name in seen_run_names:
+            continue
+        rows.append({
+            "launch_id":     None,
+            "pipeline":      run_name,
+            "revision":      None,
+            "profile":       None,
+            "launch_status": None,
+            "submitted_at":  run.get("started_at"),
+            "has_launch":    False,
+            "has_run":       True,
+            "detail_url":    f"/runs/{run['workflow_id']}",
+            "run_name":      run_name,
+            "workflow_id":   run["workflow_id"],
+            "batch_id":      run.get("batch_id"),
+            "complete":      run["complete"],
+            "stalled":       run.get("stalled", False),
+            "pct":           run["pct"],
+            "done":          run["done"],
+            "total":         run["total"],
+            "task_counts":   run["task_counts"],
+            "started_at":    run.get("started_at"),
+            "failures":      run.get("failures", []),
+            "display_status": "complete" if run["complete"] else ("stalled" if run.get("stalled") else "running"),
+        })
+
+    rows.sort(key=lambda r: r.get("submitted_at") or r.get("started_at") or 0, reverse=True)
+    return rows
+
+
 def create_app(
     db_path:          str | Path    = "turret.db",
     tower_url:        str           = "http://localhost:8000",
@@ -276,17 +380,22 @@ def create_app(
     # Web UI                                                               #
     # ------------------------------------------------------------------ #
 
+    def _pipelines_context(request: Request) -> dict:
+        rows         = _build_pipeline_rows(launcher, registry)
+        total_failed = sum(r.get("task_counts", {}).get("failed", 0) for r in rows)
+        n_running    = sum(1 for r in rows if r["display_status"] in ("running",))
+        n_complete   = sum(1 for r in rows if r["display_status"] in ("complete", "succeeded"))
+        return {
+            "rows":         rows,
+            "total_failed": total_failed,
+            "n_running":    n_running,
+            "n_complete":   n_complete,
+            "active_page":  "pipelines",
+        }
+
     @app.get("/", response_class=HTMLResponse, tags=["ui"], include_in_schema=False)
     async def ui_index(request: Request):
-        runs = registry.get_all()
-        runs.sort(key=lambda r: r["started_at"], reverse=True)
-        runs = [_enrich_run(r) for r in runs]
-        total_failed = sum(r.get("task_counts", {}).get("failed", 0) for r in runs)
-        return templates.TemplateResponse(
-            request,
-            "runs.html",
-            {"runs": runs, "total_failed": total_failed, "active_page": "runs"},
-        )
+        return templates.TemplateResponse(request, "pipelines.html", _pipelines_context(request))
 
     @app.get("/runs/{workflow_id}", response_class=HTMLResponse, tags=["ui"], include_in_schema=False)
     async def ui_run_detail(workflow_id: str, request: Request):
@@ -297,19 +406,13 @@ def create_app(
         return templates.TemplateResponse(
             request,
             "run_detail.html",
-            {"run": run, "active_page": "runs"},
+            {"run": run, "active_page": "pipelines"},
         )
 
     @app.get("/launches", response_class=HTMLResponse, tags=["ui"], include_in_schema=False)
     async def ui_launches(request: Request):
-        records = launcher.list_all()
-        launches = [r.as_dict() for r in records]
-        launches.sort(key=lambda r: r["submitted_at"], reverse=True)
-        return templates.TemplateResponse(
-            request,
-            "launches.html",
-            {"launches": launches, "active_page": "launches"},
-        )
+        """Alias for the unified pipelines dashboard."""
+        return templates.TemplateResponse(request, "pipelines.html", _pipelines_context(request))
 
     @app.get("/launch", response_class=HTMLResponse, tags=["ui"], include_in_schema=False)
     async def ui_launch_form(request: Request):
