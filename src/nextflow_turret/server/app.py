@@ -53,6 +53,7 @@ from pydantic import BaseModel
 from ..handlers import TowerRouter
 from ..db.store import RunStore
 from ..launcher.launcher import Launcher
+from ..schema import fetch_pipeline_schema
 from .registry import PersistentWorkflowRegistry
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -258,6 +259,19 @@ def create_app(
             raise HTTPException(409, detail="Launch is not in a cancellable state")
         return {"launch_id": launch_id, "status": "cancelled"}
 
+    @app.get("/api/pipeline/schema", tags=["api"])
+    async def get_pipeline_schema(
+        pipeline: str           = Query(...,      description="Pipeline identifier (e.g. nf-core/rnaseq)"),
+        revision: Optional[str] = Query(default=None, description="Git revision / tag"),
+    ):
+        """Return parameter specs from the pipeline's nextflow_schema.json."""
+        params = fetch_pipeline_schema(pipeline, revision)
+        return {
+            "params": [p.to_dict() for p in params],
+            "count":  len(params),
+            "source": "nextflow_schema.json" if params else None,
+        }
+
     # ------------------------------------------------------------------ #
     # Web UI                                                               #
     # ------------------------------------------------------------------ #
@@ -320,10 +334,21 @@ def create_app(
             "profile": profile, "work_dir": work_dir,
             "run_name": run_name, "params": params,
         }
-        # Parse params JSON
+        # Collect individual param__KEY fields from the form
+        raw_form   = await request.form()
+        import json as _json
         parsed_params: dict = {}
-        if params and params.strip():
-            import json as _json
+
+        # Priority 1: individual param__KEY fields (schema-driven form)
+        individual = {
+            k[7:]: v
+            for k, v in raw_form.items()
+            if k.startswith("param__") and str(v).strip()
+        }
+        if individual:
+            parsed_params = individual
+        elif params and params.strip():
+            # Priority 2: legacy JSON textarea fallback
             try:
                 parsed_params = _json.loads(params)
                 if not isinstance(parsed_params, dict):

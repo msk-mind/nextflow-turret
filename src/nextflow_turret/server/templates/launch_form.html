@@ -10,22 +10,31 @@
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
-<div class="card" style="max-width:640px;">
-  <form method="POST" action="/launch">
+<div class="card" style="max-width:720px;">
+  <form method="POST" action="/launch" id="launch-form">
+
+    <!-- ── Pipeline identity ────────────────────────────── -->
     <div class="form-row">
       <label for="pipeline">Pipeline <span style="color:var(--danger)">*</span></label>
       <input type="text" id="pipeline" name="pipeline" required
-             placeholder="https://github.com/org/pipeline  or  org/pipeline"
+             placeholder="nf-core/rnaseq  or  https://github.com/org/repo"
              value="{{ form.pipeline or '' }}">
+      <small class="muted">GitHub short-form (<code>org/repo</code>), full GitHub URL, or a local path.</small>
     </div>
 
-    <div class="form-row">
-      <label for="revision">Revision / Branch / Tag</label>
-      <input type="text" id="revision" name="revision"
-             placeholder="main  (leave blank for default)"
-             value="{{ form.revision or '' }}">
+    <div class="form-row" style="display:flex;gap:0.75rem;align-items:flex-end;">
+      <div style="flex:1;">
+        <label for="revision">Revision / Branch / Tag</label>
+        <input type="text" id="revision" name="revision"
+               placeholder="main"
+               value="{{ form.revision or '' }}">
+      </div>
+      <button type="button" id="load-schema-btn" class="btn btn-secondary" style="margin-bottom:0">
+        🔍 Load Parameters
+      </button>
     </div>
 
+    <!-- ── Run options ──────────────────────────────────── -->
     <div class="form-row">
       <label for="profile">Profile</label>
       <input type="text" id="profile" name="profile"
@@ -43,16 +52,182 @@
     <div class="form-row">
       <label for="run_name">Run Name</label>
       <input type="text" id="run_name" name="run_name"
-             placeholder="dispatcher_mybatch  (auto-generated if blank)"
+             placeholder="auto-generated if blank"
              value="{{ form.run_name or '' }}">
     </div>
 
-    <div class="form-row">
-      <label for="params">Parameters <span class="muted">(JSON)</span></label>
-      <textarea id="params" name="params" placeholder='{"input": "s3://bucket/samplesheet.csv", "outdir": "results"}'>{{ form.params or '' }}</textarea>
+    <!-- ── Dynamic parameter fields ─────────────────────── -->
+    <div id="schema-status" style="display:none;" class="muted" aria-live="polite"></div>
+
+    <div id="schema-params" style="display:none;">
+      <hr style="margin:1.25rem 0;">
+      <h3 style="margin-bottom:1rem;">Pipeline Parameters</h3>
+      <div id="required-params"></div>
+
+      <details id="optional-section" style="display:none;">
+        <summary style="cursor:pointer;user-select:none;margin:0.75rem 0 0.5rem;">
+          ▸ Optional parameters
+        </summary>
+        <div id="optional-params"></div>
+      </details>
     </div>
 
-    <button type="submit" class="btn btn-primary">🚀 Launch Pipeline</button>
+    <!-- ── JSON fallback ────────────────────────────────── -->
+    <div id="json-params-section">
+      <div class="form-row" id="json-fallback-row">
+        <label for="params">Parameters <span class="muted">(JSON — or use "Load Parameters" above)</span></label>
+        <textarea id="params" name="params"
+                  placeholder='{"input": "s3://bucket/samplesheet.csv", "outdir": "results"}'
+                  style="font-family:monospace;font-size:0.875rem;"
+        >{{ form.params or '' }}</textarea>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary" style="margin-top:0.5rem;">🚀 Launch Pipeline</button>
   </form>
 </div>
+
+<style>
+  .param-group { margin-bottom: 1.25rem; }
+  .param-group label { display:block; margin-bottom:0.2rem; font-weight:500; }
+  .param-group .param-desc { font-size:0.8125rem; color:var(--muted,#777); margin-top:0.15rem; }
+  .param-required-star { color:var(--danger,#c0392b); margin-left:0.15rem; }
+</style>
+
+<script>
+(function () {
+  const btn         = document.getElementById('load-schema-btn');
+  const statusEl    = document.getElementById('schema-status');
+  const schemaBlock = document.getElementById('schema-params');
+  const reqEl       = document.getElementById('required-params');
+  const optEl       = document.getElementById('optional-params');
+  const optSection  = document.getElementById('optional-section');
+  const jsonSection = document.getElementById('json-params-section');
+
+  btn.addEventListener('click', async () => {
+    const pipeline = document.getElementById('pipeline').value.trim();
+    if (!pipeline) { alert('Please enter a pipeline first.'); return; }
+
+    const revision = document.getElementById('revision').value.trim();
+    const url      = '/api/pipeline/schema?pipeline=' + encodeURIComponent(pipeline)
+                   + (revision ? '&revision=' + encodeURIComponent(revision) : '');
+
+    btn.disabled  = true;
+    btn.textContent = '⏳ Loading…';
+    statusEl.style.display = 'block';
+    statusEl.textContent = 'Fetching nextflow_schema.json…';
+
+    try {
+      const resp = await fetch(url);
+      const data = await resp.json();
+
+      if (!resp.ok || !data.params || data.params.length === 0) {
+        statusEl.textContent = data.params && data.params.length === 0
+          ? 'No schema found — enter parameters as JSON below.'
+          : 'Could not fetch schema — enter parameters as JSON below.';
+        jsonSection.style.display = '';
+        return;
+      }
+
+      // Hide JSON textarea, show individual fields
+      jsonSection.style.display  = 'none';
+      schemaBlock.style.display  = '';
+      reqEl.innerHTML  = '';
+      optEl.innerHTML  = '';
+
+      const required = data.params.filter(p => p.required && !p.hidden);
+      const optional = data.params.filter(p => !p.required && !p.hidden);
+
+      required.forEach(p => reqEl.appendChild(buildField(p, true)));
+      optional.forEach(p => optEl.appendChild(buildField(p, false)));
+
+      if (optional.length > 0) optSection.style.display = '';
+      statusEl.textContent = `Loaded ${data.params.length} parameters from ${data.source}.`;
+
+    } catch (err) {
+      statusEl.textContent = 'Error fetching schema — enter parameters as JSON below.';
+      jsonSection.style.display = '';
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = '🔍 Load Parameters';
+    }
+  });
+
+  function buildField(p, isRequired) {
+    const wrap = document.createElement('div');
+    wrap.className = 'param-group';
+
+    const label = document.createElement('label');
+    label.htmlFor = 'param__' + p.key;
+    label.textContent = p.key;
+    if (isRequired) {
+      const star = document.createElement('span');
+      star.className = 'param-required-star';
+      star.textContent = ' *';
+      label.appendChild(star);
+    }
+    wrap.appendChild(label);
+
+    let input;
+
+    if (p.choices && p.choices.length > 0) {
+      input = document.createElement('select');
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = '— select —';
+      input.appendChild(empty);
+      p.choices.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        if (p.default !== null && String(p.default) === c) opt.selected = true;
+        input.appendChild(opt);
+      });
+
+    } else if (p.type === 'boolean') {
+      input = document.createElement('input');
+      input.type    = 'checkbox';
+      input.value   = 'true';
+      if (p.default === true || p.default === 'true') input.checked = true;
+      // Checkbox uses special serialisation: only included when checked
+      // We'll use a hidden companion field + checkbox approach
+      const hidden = document.createElement('input');
+      hidden.type  = 'hidden';
+      hidden.name  = 'param__' + p.key;
+      hidden.value = 'false';
+      wrap.appendChild(hidden);
+      input.addEventListener('change', () => { hidden.value = input.checked ? 'true' : 'false'; });
+
+    } else if (p.type === 'integer' || p.type === 'number') {
+      input = document.createElement('input');
+      input.type = 'number';
+      if (p.default !== null && p.default !== undefined) input.value = p.default;
+
+    } else {
+      input = document.createElement('input');
+      input.type = 'text';
+      if (p.default !== null && p.default !== undefined) input.value = p.default;
+      if (p.key === 'input' || p.key === 'samplesheet') {
+        input.placeholder = 'Path to samplesheet CSV';
+      } else if (p.key === 'outdir' || p.key === 'output') {
+        input.placeholder = 'results';
+      }
+    }
+
+    input.id       = 'param__' + p.key;
+    if (input.type !== 'checkbox') input.name = 'param__' + p.key;
+    if (isRequired && input.type !== 'checkbox') input.required = true;
+    wrap.appendChild(input);
+
+    if (p.description) {
+      const desc = document.createElement('div');
+      desc.className   = 'param-desc';
+      desc.textContent = p.description;
+      wrap.appendChild(desc);
+    }
+
+    return wrap;
+  }
+})();
+</script>
 {% endblock %}
