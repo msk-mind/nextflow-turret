@@ -75,7 +75,7 @@ def main() -> None:
     if cfg_path:
         print(f"[turret] loaded config: {cfg_path}")
 
-    if cfg.auth.enabled:
+    if cfg.auth.mode.value != "none":
         print(f"[turret] auth mode: {cfg.auth.mode.value}")
 
     tower_url = f"http://{'localhost' if args.host == '0.0.0.0' else args.host}:{args.port}"
