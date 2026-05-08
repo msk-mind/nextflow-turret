@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+src/nextflow_turret/__init__.py
+src/nextflow_turret/handlers.py
+src/nextflow_turret/state.py
+src/nextflow_turret/utils.py
+src/nextflow_turret.egg-info/PKG-INFO
+src/nextflow_turret.egg-info/SOURCES.txt
+src/nextflow_turret.egg-info/dependency_links.txt
+src/nextflow_turret.egg-info/top_level.txt
+tests/test_turret.py

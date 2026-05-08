@@ -1,0 +1,130 @@
+# nextflow-turret
+
+An in-process shim that lets any Nextflow pipeline report real-time progress
+via the Tower trace protocol (`-with-tower`) **without a Seqera Platform subscription**.
+
+---
+
+## How it works
+
+Nextflow's `-with-tower` flag makes the executor send HTTP trace events to a URL
+of your choosing.  `nextflow-turret` implements just enough of the Tower REST API to
+accept those events and accumulate them into an in-memory
+[`WorkflowRegistry`](src/nextflow_turret/state.py).  Your application can then
+query that registry at any time to display live progress.
+
+Endpoints implemented:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/user-info` | NF auth check on startup |
+| `POST` | `/trace/create` | Workflow start → returns `{workflowId}` |
+| `PUT` | `/trace/{id}/begin` | Workflow running (runName available) |
+| `PUT` | `/trace/{id}/progress` | Periodic task counts + per-task list |
+| `PUT` | `/trace/{id}/heartbeat` | Keepalive (same payload as progress) |
+| `PUT` | `/trace/{id}/complete` | Workflow finished |
+
+---
+
+## Installation
+
+```bash
+pip install git+https://github.com/msk-mind/nextflow-turret.git
+```
+
+---
+
+## Quick start
+
+```python
+# 1. In your server / dashboard, wire up the router:
+from nextflow_turret import TowerRouter, WorkflowRegistry
+
+registry = WorkflowRegistry()
+router   = TowerRouter(registry=registry)
+
+# 2. In your HTTP handler (example: http.server):
+class MyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        result = router.handle_get(self.path)
+        if result:
+            status, body = result
+            self._send_json(body, status)
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body   = json.loads(self.rfile.read(length) or b"{}")
+        result = router.handle_post(self.path, body)
+        if result:
+            status, body = result
+            self._send_json(body, status)
+
+    def do_PUT(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body   = json.loads(self.rfile.read(length) or b"{}")
+        result = router.handle_put(self.path, body)
+        if result:
+            status, body = result
+            self._send_json(body, status)
+
+# 3. Point Nextflow at your server:
+#    nextflow run main.nf -with-tower http://localhost:8000 -name dispatcher_mybatch
+
+# 4. Read progress at any time:
+state = registry.get_by_batch("mybatch")
+print(state["pct"], "% complete")
+```
+
+---
+
+## run_name → batch_id mapping
+
+By convention, the run name passed to `-name` should be `dispatcher_{batch_id}`.
+`TowerRouter` strips the `dispatcher_` prefix to recover the *batch_id*.
+
+You can supply your own mapping at construction time:
+
+```python
+router = TowerRouter(
+    registry=registry,
+    run_name_to_batch_id=lambda name: name.removeprefix("mypipeline_"),
+)
+```
+
+---
+
+## Module-level singleton
+
+For simple single-process use, convenience functions wrapping a global
+`WorkflowRegistry` are available:
+
+```python
+import nextflow_turret as turret
+
+turret.register_workflow(workflow_id, batch_id, run_name)
+turret.update_progress(workflow_id, progress_dict, tasks_list)
+turret.mark_complete(workflow_id)
+
+state = turret.get_progress(batch_id)   # → dict or None
+```
+
+---
+
+## Utilities
+
+```python
+from nextflow_turret import tower_process_to_slurm_name
+
+# Convert Tower process name to SLURM job name prefix
+tower_process_to_slurm_name("MUSSEL:EXTRACT_FEATURES:TESSELLATE_FEATURIZE_BATCH")
+# → "MUSSEL_EXTRACT_FEATURES_TESSELLATE_FEATURIZE_BATCH"
+```
+
+---
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
