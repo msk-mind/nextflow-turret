@@ -92,19 +92,24 @@ def main() -> None:
 
 
 def _cmd_hash_password(argv: list[str]) -> None:
-    """``turret hash-password <password>`` — print a bcrypt hash."""
+    """``turret hash-password`` — print a bcrypt hash.
+
+    The password is always read interactively from the terminal to avoid
+    exposing it in shell history or process listings.  Passing a positional
+    argument is intentionally not supported for this reason.
+    """
     parser = argparse.ArgumentParser(
         prog="turret hash-password",
         description="Generate a bcrypt password hash for use in [auth.basic] password_hash",
     )
-    parser.add_argument("password", nargs="?", default=None,
-                        help="Password to hash (prompted if omitted)")
-    args = parser.parse_args(argv)
+    parser.parse_args(argv)  # accepts no positional args; prints help on --help
 
-    password = args.password
-    if password is None:
-        import getpass
-        password = getpass.getpass("Password: ")
+    import getpass
+    password = getpass.getpass("Password: ")
+    confirm  = getpass.getpass("Confirm password: ")
+    if password != confirm:
+        print("Error: passwords do not match", file=sys.stderr)
+        sys.exit(1)
 
     from ..auth import make_password_hash
     print(make_password_hash(password))

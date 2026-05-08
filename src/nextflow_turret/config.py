@@ -39,6 +39,7 @@ Example ``turret.toml``::
 """
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -138,9 +139,16 @@ def load_config(config_path: Optional[str] = None) -> tuple[TurretConfig, Option
     if "default_profile" in launcher: cfg.default_profile = str(launcher["default_profile"])
 
     # auth section
-    auth_raw  = data.get("auth", {})
-    auth_mode = AuthMode(auth_raw.get("mode", "none"))
-    auth_secret = str(auth_raw.get("session_secret", ""))
+    # Environment variables take priority over config file values for secrets.
+    # Supported env vars:
+    #   TURRET_SESSION_SECRET       — session cookie signing key
+    #   TURRET_OIDC_CLIENT_SECRET   — OIDC client secret
+    auth_raw    = data.get("auth", {})
+    auth_mode   = AuthMode(auth_raw.get("mode", "none"))
+    auth_secret = (
+        os.environ.get("TURRET_SESSION_SECRET")
+        or str(auth_raw.get("session_secret", ""))
+    )
 
     basic_cfg: Optional[BasicAuthConfig] = None
     oidc_cfg:  Optional[OIDCConfig]      = None
@@ -156,7 +164,10 @@ def load_config(config_path: Optional[str] = None) -> tuple[TurretConfig, Option
     if oidc_raw:
         oidc_cfg = OIDCConfig(
             client_id     = str(oidc_raw.get("client_id", "")),
-            client_secret = str(oidc_raw.get("client_secret", "")),
+            client_secret = (
+                os.environ.get("TURRET_OIDC_CLIENT_SECRET")
+                or str(oidc_raw.get("client_secret", ""))
+            ),
             discovery_url = str(oidc_raw.get("discovery_url", "")),
             redirect_uri  = oidc_raw.get("redirect_uri") or None,
             scopes        = list(oidc_raw.get("scopes", ["openid", "email", "profile"])),

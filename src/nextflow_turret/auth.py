@@ -26,19 +26,32 @@ Generating a password hash
 --------------------------
 ::
 
-    turret hash-password mysecretpassword
+    turret hash-password
+
+Security notes
+--------------
+- ``next`` redirect parameters are validated to be same-origin (relative path
+  only); absolute URLs to other hosts are rejected.
+- OIDC state is a random token stored in the session; the post-login redirect
+  URL is stored separately in the session to prevent open-redirect via ``state``.
+- A missing ``session_secret`` triggers a loud warning on startup.
 """
 from __future__ import annotations
 
 import base64
+import logging
 import secrets
+import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
+from urllib.parse import urlparse
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -76,8 +89,14 @@ class AuthConfig:
     def __post_init__(self):
         if self.mode != AuthMode.NONE and not self.session_secret:
             # Auto-generate a random secret when not configured.
-            # Warn: sessions will be invalidated on every server restart.
+            # Sessions will be invalidated on every server restart — warn loudly.
             self.session_secret = secrets.token_urlsafe(32)
+            warnings.warn(
+                "[turret] WARNING: auth.session_secret is not set in turret.toml. "
+                "A random secret was generated; all sessions will be lost on every "
+                "server restart. Set a persistent secret to avoid this.",
+                stacklevel=2,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +118,27 @@ def _verify_bcrypt(password: str, hashed: str) -> bool:
         return bcrypt.checkpw(password.encode(), hashed.encode())
     except Exception:
         return False
+
+
+def is_safe_next_url(url: str) -> bool:
+    """Return True only for relative (same-origin) redirect URLs.
+
+    Absolute URLs pointing to other hosts are rejected to prevent open-redirect
+    attacks via the ``?next=`` parameter.
+    """
+    if not url:
+        return False
+    parsed = urlparse(url)
+    # Reject anything with a scheme (http://, https://, javascript:, etc.)
+    # or a netloc (//evil.com style protocol-relative URLs)
+    return not parsed.scheme and not parsed.netloc
+
+
+def safe_next_url(url: Optional[str], default: str = "/") -> str:
+    """Return *url* if it is a safe relative URL, otherwise *default*."""
+    if url and is_safe_next_url(url):
+        return url
+    return default
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +305,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 headers={"WWW-Authenticate": "Basic realm='Nextflow Turret'"},
             )
 
+        # Only include path+query in the `next` param, never full URL (prevents open-redirect)
         from urllib.parse import quote
-        next_url = quote(str(request.url), safe="")
-        return RedirectResponse(f"/auth/login?next={next_url}", status_code=302)
+        next_path = request.url.path
+        if request.url.query:
+            next_path += "?" + request.url.query
+        return RedirectResponse(f"/auth/login?next={quote(next_path, safe='')}", status_code=302)

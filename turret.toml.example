@@ -26,6 +26,10 @@
 # [auth]
 # mode           = "none"
 # session_secret = "change-me-to-a-random-secret"
+#
+# Alternatively, set session_secret via environment variable (recommended for containers):
+#   TURRET_SESSION_SECRET=<random-value>
+#   TURRET_OIDC_CLIENT_SECRET=<secret>  (overrides auth.oidc.client_secret)
 
 # Basic auth — single username/password
 # Generate a hash with: turret hash-password mysecretpassword

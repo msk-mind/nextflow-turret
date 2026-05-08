@@ -40,6 +40,7 @@ POST    /launches/{id}/cancel        Cancel a launch (HTML form)
 """
 from __future__ import annotations
 
+import secrets
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,8 +50,10 @@ from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
-from ..auth import AuthConfig, AuthManager, AuthMiddleware, AuthMode
+from ..auth import AuthConfig, AuthManager, AuthMiddleware, AuthMode, safe_next_url
 from ..handlers import TowerRouter
 from ..db.store import RunStore
 from ..launcher.launcher import Launcher
@@ -58,6 +61,29 @@ from ..schema import fetch_pipeline_schema
 from .registry import PersistentWorkflowRegistry
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+
+# ---------------------------------------------------------------------------
+# Security headers middleware
+# ---------------------------------------------------------------------------
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add defensive HTTP security headers to every response."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "font-src 'self'",
+        )
+        return response
 
 
 def _make_templates(auth_mgr: "AuthManager") -> Jinja2Templates:
@@ -289,8 +315,14 @@ def create_app(
         from starlette.middleware.sessions import SessionMiddleware
         # AuthMiddleware added first → becomes the *inner* middleware (runs last on request)
         app.add_middleware(AuthMiddleware, auth_manager=auth_mgr)
-        # SessionMiddleware added last → becomes the *outermost* (runs first on request)
+        # SessionMiddleware → wraps AuthMiddleware so sessions are available inside it
         app.add_middleware(SessionMiddleware, secret_key=auth_config.session_secret)
+
+    # ------------------------------------------------------------------ #
+    # Security headers — added LAST so it is the outermost middleware and #
+    # applies to ALL responses including 401s from AuthMiddleware          #
+    # ------------------------------------------------------------------ #
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # ------------------------------------------------------------------ #
     # Tower trace endpoints                                                #
@@ -314,7 +346,7 @@ def create_app(
         path = f"/trace/{workflow_id}/{action}"
         result = router.handle_put(path, await _body(request))
         if result is None:
-            raise HTTPException(404, detail=f"Unknown Tower action: {action!r}")
+            raise HTTPException(404, detail="Unknown Tower action")
         status, body = result
         return JSONResponse(body, status_code=status)
 
@@ -334,7 +366,7 @@ def create_app(
         """Return the full state dict for a single workflow run."""
         state = registry.get_by_id(workflow_id)
         if state is None:
-            raise HTTPException(404, detail=f"Workflow '{workflow_id}' not found")
+            raise HTTPException(404, detail="Workflow not found")
         return state
 
     # ------------------------------------------------------------------ #
@@ -369,7 +401,7 @@ def create_app(
         """Return current status of a single launch."""
         record = launcher.get(launch_id)
         if record is None:
-            raise HTTPException(404, detail=f"Launch '{launch_id}' not found")
+            raise HTTPException(404, detail="Launch not found")
         return record.as_dict()
 
     @app.get("/api/launches/{launch_id}/log", tags=["api"], response_class=PlainTextResponse)
@@ -380,7 +412,7 @@ def create_app(
         """Return the stdout/stderr log for a launch."""
         record = launcher.get(launch_id)
         if record is None:
-            raise HTTPException(404, detail=f"Launch '{launch_id}' not found")
+            raise HTTPException(404, detail="Launch not found")
         return PlainTextResponse(launcher.read_log(launch_id, tail=tail))
 
     @app.delete("/api/launches/{launch_id}", tags=["api"])
@@ -388,7 +420,7 @@ def create_app(
         """Cancel a running pipeline launch (sends SIGTERM)."""
         record = launcher.get(launch_id)
         if record is None:
-            raise HTTPException(404, detail=f"Launch '{launch_id}' not found")
+            raise HTTPException(404, detail="Launch not found")
         sent = launcher.cancel(launch_id)
         if not sent:
             raise HTTPException(409, detail="Launch is not in a cancellable state")
@@ -432,7 +464,7 @@ def create_app(
     async def ui_run_detail(workflow_id: str, request: Request):
         state = registry.get_by_id(workflow_id)
         if state is None:
-            raise HTTPException(404, detail=f"Workflow '{workflow_id}' not found")
+            raise HTTPException(404, detail="Workflow not found")
         run = _enrich_run(state)
         return templates.TemplateResponse(
             request,
@@ -471,22 +503,48 @@ def create_app(
         # Collect individual param__KEY fields from the form
         raw_form   = await request.form()
         import json as _json
+        import re as _re
         parsed_params: dict = {}
+
+        # Param key validation: only word characters and hyphens (safe for CLI args)
+        _VALID_PARAM_KEY = _re.compile(r'^[\w][\w\-]*$')
+        _MAX_PARAMS_JSON_BYTES = 100_000
+
+        def _validate_param_key(key: str) -> bool:
+            return bool(_VALID_PARAM_KEY.match(key))
 
         # Priority 1: individual param__KEY fields (schema-driven form)
         individual = {
-            k[7:]: v
+            k[7:]: str(v)
             for k, v in raw_form.items()
             if k.startswith("param__") and str(v).strip()
         }
+        invalid_keys = [k for k in individual if not _validate_param_key(k)]
+        if invalid_keys:
+            return templates.TemplateResponse(
+                request,
+                "launch_form.html",
+                {"form": form_data, "error": f"Invalid parameter name(s): {', '.join(invalid_keys)}", "active_page": "launch"},
+                status_code=422,
+            )
         if individual:
             parsed_params = individual
         elif params and params.strip():
             # Priority 2: legacy JSON textarea fallback
+            if len(params.encode()) > _MAX_PARAMS_JSON_BYTES:
+                return templates.TemplateResponse(
+                    request,
+                    "launch_form.html",
+                    {"form": form_data, "error": "params JSON exceeds maximum size", "active_page": "launch"},
+                    status_code=422,
+                )
             try:
                 parsed_params = _json.loads(params)
                 if not isinstance(parsed_params, dict):
                     raise ValueError("params must be a JSON object")
+                invalid_keys = [k for k in parsed_params if not _validate_param_key(str(k))]
+                if invalid_keys:
+                    raise ValueError(f"Invalid parameter name(s): {', '.join(invalid_keys)}")
             except Exception as exc:
                 return templates.TemplateResponse(
                     request,
@@ -517,7 +575,7 @@ def create_app(
     async def ui_launch_detail(launch_id: str, request: Request):
         record = launcher.get(launch_id)
         if record is None:
-            raise HTTPException(404, detail=f"Launch '{launch_id}' not found")
+            raise HTTPException(404, detail="Launch not found")
         launch = record.as_dict()
         log    = launcher.read_log(launch_id, tail=200)
 
@@ -553,16 +611,22 @@ def create_app(
 
     @app.get("/auth/login", response_class=HTMLResponse, tags=["auth"], include_in_schema=False)
     async def auth_login_form(request: Request, next: Optional[str] = None):
+        # Validate and sanitise the `next` param before using it
+        destination = safe_next_url(next, default="/")
         if auth_mgr.config.mode == AuthMode.OIDC:
-            # Redirect straight to provider
-            oauth   = auth_mgr.get_oauth()
-            cb_url  = auth_mgr.config.oidc.redirect_uri or str(request.url_for("auth_callback"))
-            return await oauth.oidc.authorize_redirect(request, cb_url, state=next or "/")
+            # OIDC: store the intended destination in the session; use a random
+            # opaque token as the `state` parameter (prevents open-redirect via state).
+            oauth    = auth_mgr.get_oauth()
+            cb_url   = auth_mgr.config.oidc.redirect_uri or str(request.url_for("auth_callback"))
+            oidc_state = secrets.token_urlsafe(32)
+            request.session["oidc_state"]       = oidc_state
+            request.session["oidc_next"]        = destination
+            return await oauth.oidc.authorize_redirect(request, cb_url, state=oidc_state)
         # Basic auth — show login form
         return templates.TemplateResponse(
             request,
             "login.html",
-            {"next": next or "/", "error": None, "active_page": None},
+            {"next": destination, "error": None, "active_page": None},
         )
 
     @app.post("/auth/login", response_class=HTMLResponse, tags=["auth"], include_in_schema=False)
@@ -572,22 +636,31 @@ def create_app(
         password: str           = Form(...),
         next:     Optional[str] = Form(default="/"),
     ):
+        # Validate next before use
+        destination = safe_next_url(next, default="/")
         user = auth_mgr.verify_basic_credentials(username, password)
         if user is None:
             return templates.TemplateResponse(
                 request,
                 "login.html",
-                {"next": next or "/", "error": "Invalid username or password", "active_page": None},
+                {"next": destination, "error": "Invalid username or password", "active_page": None},
                 status_code=401,
             )
         auth_mgr.set_user(request, user)
-        return RedirectResponse(next or "/", status_code=303)
+        return RedirectResponse(destination, status_code=303)
 
     @app.get("/auth/callback", tags=["auth"], include_in_schema=False)
     async def auth_callback(request: Request):
         """OIDC authorization code callback."""
         if auth_mgr.config.mode != AuthMode.OIDC:
             raise HTTPException(404)
+
+        # Verify state matches what we stored in the session (CSRF protection)
+        stored_state   = request.session.pop("oidc_state", None)
+        received_state = request.query_params.get("state")
+        if not stored_state or stored_state != received_state:
+            raise HTTPException(403, detail="Invalid OIDC state")
+
         oauth  = auth_mgr.get_oauth()
         token  = await oauth.oidc.authorize_access_token(request)
         claims = token.get("userinfo") or token.get("id_token_claims") or {}
@@ -598,8 +671,9 @@ def create_app(
             "auth_method": "oidc",
         }
         auth_mgr.set_user(request, user)
-        next_url = request.query_params.get("state") or "/"
-        return RedirectResponse(next_url, status_code=303)
+        # Retrieve and clear the saved destination (already validated when stored)
+        destination = request.session.pop("oidc_next", "/")
+        return RedirectResponse(safe_next_url(destination, default="/"), status_code=303)
 
     @app.get("/auth/logout", tags=["auth"], include_in_schema=False)
     async def auth_logout(request: Request):

@@ -7,6 +7,9 @@ Covers:
 - /auth/whoami reflects session state
 - /auth/logout clears the session
 - turret hash-password CLI command
+- Open-redirect prevention on next= parameter
+- Security headers present on all responses
+- Param key validation on launch form
 """
 from __future__ import annotations
 
@@ -20,7 +23,9 @@ from nextflow_turret.auth import (
     AuthMode,
     BasicAuthConfig,
     AuthManager,
+    is_safe_next_url,
     make_password_hash,
+    safe_next_url,
 )
 from nextflow_turret.server.app import create_app
 
@@ -266,3 +271,151 @@ class TestAuthConfig:
     def test_explicit_secret_is_kept(self):
         cfg = AuthConfig(mode=AuthMode.BASIC, session_secret="my-secret")
         assert cfg.session_secret == "my-secret"
+
+
+# ---------------------------------------------------------------------------
+# Open-redirect prevention
+# ---------------------------------------------------------------------------
+
+class TestOpenRedirect:
+    """is_safe_next_url / safe_next_url helpers prevent open-redirect attacks."""
+
+    def test_relative_path_is_safe(self):
+        assert is_safe_next_url("/dashboard") is True
+
+    def test_relative_path_with_query_is_safe(self):
+        assert is_safe_next_url("/runs?status=running") is True
+
+    def test_absolute_http_url_is_not_safe(self):
+        assert is_safe_next_url("http://evil.com") is False
+
+    def test_absolute_https_url_is_not_safe(self):
+        assert is_safe_next_url("https://evil.com/steal") is False
+
+    def test_protocol_relative_url_is_not_safe(self):
+        # //evil.com is a protocol-relative absolute URL
+        assert is_safe_next_url("//evil.com") is False
+
+    def test_javascript_scheme_is_not_safe(self):
+        assert is_safe_next_url("javascript:alert(1)") is False
+
+    def test_none_is_not_safe(self):
+        assert is_safe_next_url(None) is False
+
+    def test_safe_next_url_returns_url_when_safe(self):
+        assert safe_next_url("/dashboard") == "/dashboard"
+
+    def test_safe_next_url_returns_default_when_unsafe(self):
+        assert safe_next_url("http://evil.com", default="/") == "/"
+
+    def test_safe_next_url_returns_default_for_none(self):
+        assert safe_next_url(None, default="/home") == "/home"
+
+    def test_login_next_redirect_is_sanitised(self):
+        """GET /auth/login?next= with absolute URL must not redirect to evil host."""
+        c = _basic_app()
+        # Attempt open redirect
+        r = c.post(
+            "/auth/login",
+            data={"username": _USERNAME, "password": _PASSWORD, "next": "http://evil.com"},
+            follow_redirects=False,
+        )
+        # Must redirect to the default "/" (or some safe path), not to evil.com
+        assert r.status_code == 303
+        location = r.headers.get("location", "")
+        assert "evil.com" not in location
+        assert location == "/"
+
+
+# ---------------------------------------------------------------------------
+# Security headers
+# ---------------------------------------------------------------------------
+
+class TestSecurityHeaders:
+    """SecurityHeadersMiddleware must be present on all responses."""
+
+    REQUIRED_HEADERS = [
+        "x-frame-options",
+        "x-content-type-options",
+        "referrer-policy",
+        "content-security-policy",
+    ]
+
+    def test_security_headers_on_index(self):
+        c = _no_auth_app()
+        r = c.get("/")
+        for h in self.REQUIRED_HEADERS:
+            assert h in r.headers, f"Missing header: {h}"
+
+    def test_security_headers_on_api(self):
+        c = _no_auth_app()
+        r = c.get("/api/runs")
+        for h in self.REQUIRED_HEADERS:
+            assert h in r.headers, f"Missing header: {h}"
+
+    def test_security_headers_on_401(self):
+        c = _basic_app()
+        r = c.get("/api/runs")
+        assert r.status_code == 401
+        for h in self.REQUIRED_HEADERS:
+            assert h in r.headers, f"Missing header on 401 response: {h}"
+
+    def test_x_frame_options_is_deny(self):
+        c = _no_auth_app()
+        r = c.get("/")
+        assert r.headers.get("x-frame-options", "").upper() == "DENY"
+
+    def test_x_content_type_options_is_nosniff(self):
+        c = _no_auth_app()
+        r = c.get("/")
+        assert r.headers.get("x-content-type-options", "").lower() == "nosniff"
+
+
+# ---------------------------------------------------------------------------
+# Param key validation on /launch submit
+# ---------------------------------------------------------------------------
+
+class TestParamKeyValidation:
+    """Invalid param keys must be rejected with 422."""
+
+    def _login(self, c: TestClient) -> None:
+        c.post("/auth/login", data={"username": _USERNAME, "password": _PASSWORD})
+
+    def test_valid_param_key_accepted(self):
+        c = _basic_app()
+        self._login(c)
+        r = c.post(
+            "/launch",
+            data={
+                "pipeline": "nf-core/test",
+                "params": '{"input": "s3://bucket/file.csv"}',
+            },
+            follow_redirects=False,
+        )
+        # Accepted (redirects to launch detail) — not a 422
+        assert r.status_code in (303, 200)
+
+    def test_invalid_param_key_rejected(self):
+        c = _basic_app()
+        self._login(c)
+        # Keys with shell metacharacters should be rejected
+        r = c.post(
+            "/launch",
+            data={
+                "pipeline": "nf-core/test",
+                "params": '{"--inject; rm -rf /": "value"}',
+            },
+            follow_redirects=False,
+        )
+        assert r.status_code == 422
+
+    def test_oversized_params_rejected(self):
+        c = _basic_app()
+        self._login(c)
+        huge_json = '{"k": "' + "x" * (101 * 1024) + '"}'
+        r = c.post(
+            "/launch",
+            data={"pipeline": "nf-core/test", "params": huge_json},
+            follow_redirects=False,
+        )
+        assert r.status_code == 422

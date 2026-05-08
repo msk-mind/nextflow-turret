@@ -236,7 +236,7 @@ class Launcher:
         with self._lock:
             record = self._records[launch_id]
 
-        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         cmd = self._build_cmd(record)
 
         with self._lock:
@@ -244,8 +244,14 @@ class Launcher:
             record.started_at = time.time()
 
         try:
-            with open(record.log_path, "w") as log_fh:
-                log_fh.write(f"# command: {' '.join(cmd)}\n\n")
+            # Create the log file with owner-read-only permissions before writing
+            log_path = Path(record.log_path)
+            log_path.touch(mode=0o600, exist_ok=True)
+            # Log the command without param values to avoid leaking secrets
+            param_summary = ", ".join(f"--{k}" for k in record.params) if record.params else "(none)"
+            with open(log_path, "w") as log_fh:
+                log_fh.write(f"# pipeline: {record.pipeline}\n")
+                log_fh.write(f"# params:   {param_summary}\n\n")
                 log_fh.flush()
                 proc = subprocess.Popen(
                     cmd,
@@ -271,6 +277,8 @@ class Launcher:
                 record.status      = LaunchStatus.FAILED
                 record.finished_at = time.time()
             try:
-                Path(record.log_path).open("a").write(f"\n# ERROR: {exc}\n")
+                # Truncate the error message to avoid leaking sensitive system info
+                err_msg = str(exc)[:200]
+                Path(record.log_path).open("a").write(f"\n# ERROR: {err_msg}\n")
             except Exception:
                 pass
