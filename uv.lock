@@ -291,9 +291,7 @@ wheels = [
 name = "nextflow-turret"
 version = "0.1.0"
 source = { editable = "." }
-
-[package.optional-dependencies]
-server = [
+dependencies = [
     { name = "fastapi" },
     { name = "jinja2" },
     { name = "python-multipart" },
@@ -302,29 +300,22 @@ server = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "fastapi" },
     { name = "httpx" },
-    { name = "jinja2" },
     { name = "pytest" },
-    { name = "python-multipart" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.111" },
-    { name = "jinja2", marker = "extra == 'server'", specifier = ">=3.1" },
-    { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.29" },
+    { name = "fastapi", specifier = ">=0.111" },
+    { name = "jinja2", specifier = ">=3.1" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]
-provides-extras = ["server"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "fastapi", specifier = ">=0.111" },
     { name = "httpx" },
-    { name = "jinja2", specifier = ">=3.1" },
     { name = "pytest" },
-    { name = "python-multipart", specifier = ">=0.0.9" },
 ]
 
 [[package]]

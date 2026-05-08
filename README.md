@@ -22,14 +22,11 @@ a web UI, and inspect logs — all without a cloud subscription.
 ## Installation
 
 ```bash
-# Full server (FastAPI + Jinja2 UI) — preferred
-uv add "nextflow-turret[server] @ git+https://github.com/msk-mind/nextflow-turret.git"
+# Into an existing project
+uv add "nextflow-turret @ git+https://github.com/msk-mind/nextflow-turret.git"
 
 # Or with pip
-pip install "nextflow-turret[server] @ git+https://github.com/msk-mind/nextflow-turret.git"
-
-# Library only (stdlib core, no extra deps)
-uv add "nextflow-turret @ git+https://github.com/msk-mind/nextflow-turret.git"
+pip install "nextflow-turret @ git+https://github.com/msk-mind/nextflow-turret.git"
 ```
 
 ---
