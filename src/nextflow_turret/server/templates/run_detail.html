@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title_suffix %} — {{ run.run_name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="muted" style="font-size:12px;margin-bottom:4px;"><a href="/">← Runs</a></div>
+    <h1 class="page-title mono" style="font-size:18px;">{{ run.run_name }}</h1>
+  </div>
+  <div style="text-align:right;">
+    {% if run.complete %}
+      <span class="badge badge-complete" style="font-size:13px;padding:4px 12px;">Complete</span>
+    {% elif run.stalled %}
+      <span class="badge badge-stalled" style="font-size:13px;padding:4px 12px;">Stalled</span>
+    {% else %}
+      <span class="badge badge-running" style="font-size:13px;padding:4px 12px;">Running</span>
+      <div class="muted" style="font-size:12px;margin-top:6px;"><span class="refresh-dot"></span>Auto-refreshing</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Summary stats -->
+<div class="stat-grid">
+  <div class="stat"><div class="stat-label">Done</div><div class="stat-value" style="color:var(--success)">{{ run.done }}</div></div>
+  <div class="stat"><div class="stat-label">Total</div><div class="stat-value">{{ run.total }}</div></div>
+  <div class="stat"><div class="stat-label">Running</div><div class="stat-value" style="color:var(--accent)">{{ run.task_counts.get('running', 0) }}</div></div>
+  <div class="stat"><div class="stat-label">Failed</div><div class="stat-value" style="color:var(--danger)">{{ run.task_counts.get('failed', 0) }}</div></div>
+  <div class="stat"><div class="stat-label">Cached</div><div class="stat-value" style="color:var(--muted)">{{ run.task_counts.get('cached', 0) }}</div></div>
+  <div class="stat"><div class="stat-label">Progress</div><div class="stat-value">{{ run.pct }}%</div></div>
+</div>
+
+<!-- Overall progress bar -->
+<div class="card" style="padding:16px 24px;">
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div class="progress-wrap" style="flex:1;height:10px;border-radius:5px;">
+      <div class="progress-bar" style="width:{{ run.pct }}%;height:10px;border-radius:5px;"></div>
+    </div>
+    <span style="font-size:18px;font-weight:700;">{{ run.pct }}%</span>
+  </div>
+</div>
+
+<!-- Run metadata -->
+<div class="card">
+  <div class="card-title">Details</div>
+  <table>
+    <tr><td class="muted" style="width:160px;">Workflow ID</td><td class="mono">{{ run.workflow_id }}</td></tr>
+    <tr><td class="muted">Batch ID</td><td class="mono">{{ run.batch_id }}</td></tr>
+    <tr><td class="muted">Started</td><td>{{ run.started_at | fmt_time }}</td></tr>
+    <tr><td class="muted">Last update</td><td>{{ run.updated_at | fmt_time }}</td></tr>
+    {% if run.resources %}
+    <tr><td class="muted">Peak CPUs</td><td>{{ run.resources.get('peakCpus', '—') }}</td></tr>
+    <tr><td class="muted">Peak Memory</td><td>{{ run.resources.get('peakMemory', '—') }}</td></tr>
+    {% endif %}
+  </table>
+</div>
+
+<!-- Per-process breakdown -->
+{% if run.processes %}
+<div class="card">
+  <div class="card-title">Processes</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Process</th>
+        <th>Pending</th>
+        <th>Running</th>
+        <th>Succeeded</th>
+        <th>Cached</th>
+        <th>Failed</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in run.processes %}
+      <tr>
+        <td class="process-table">{{ p.get('process', p.get('name', '?')) }}</td>
+        <td class="muted">{{ p.get('pending', 0) }}</td>
+        <td style="color:var(--accent)">{{ p.get('running', 0) }}</td>
+        <td style="color:var(--success)">{{ p.get('succeeded', 0) }}</td>
+        <td class="muted">{{ p.get('cached', 0) }}</td>
+        <td {% if p.get('failed', 0) %}style="color:var(--danger)"{% endif %}>{{ p.get('failed', 0) }}</td>
+        <td>{{ (p.get('pending',0) + p.get('running',0) + p.get('succeeded',0) + p.get('cached',0) + p.get('failed',0)) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Failures -->
+{% if run.failures %}
+<div class="card">
+  <div class="card-title" style="color:var(--danger);">Failed Tasks ({{ run.failures | length }})</div>
+  <ul class="failures-list">
+    {% for f in run.failures %}
+    <li>
+      <span style="color:var(--danger);">✗</span>
+      <strong>{{ f.get('process','') }}</strong>
+      {{ f.get('name','') }}
+      {% if f.get('tag') %}<span class="muted">[{{ f.tag }}]</span>{% endif %}
+      {% if f.get('exit') is not none %}<span class="muted">exit={{ f.exit }}</span>{% endif %}
+      {% if f.get('hash') %}<span class="muted">hash={{ f.hash }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const isActive = {{ 'true' if not run.complete else 'false' }};
+  if (isActive) setTimeout(() => location.reload(), 5000);
+</script>
+{% endblock %}

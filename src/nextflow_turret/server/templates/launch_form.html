@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title_suffix %} — New Launch{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">New Pipeline Launch</h1>
+</div>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<div class="card" style="max-width:640px;">
+  <form method="POST" action="/launch">
+    <div class="form-row">
+      <label for="pipeline">Pipeline <span style="color:var(--danger)">*</span></label>
+      <input type="text" id="pipeline" name="pipeline" required
+             placeholder="https://github.com/org/pipeline  or  org/pipeline"
+             value="{{ form.pipeline or '' }}">
+    </div>
+
+    <div class="form-row">
+      <label for="revision">Revision / Branch / Tag</label>
+      <input type="text" id="revision" name="revision"
+             placeholder="main  (leave blank for default)"
+             value="{{ form.revision or '' }}">
+    </div>
+
+    <div class="form-row">
+      <label for="profile">Profile</label>
+      <input type="text" id="profile" name="profile"
+             placeholder="e.g. slurm, docker, singularity"
+             value="{{ form.profile or '' }}">
+    </div>
+
+    <div class="form-row">
+      <label for="work_dir">Work Directory</label>
+      <input type="text" id="work_dir" name="work_dir"
+             placeholder="/scratch/work  (leave blank for Nextflow default)"
+             value="{{ form.work_dir or '' }}">
+    </div>
+
+    <div class="form-row">
+      <label for="run_name">Run Name</label>
+      <input type="text" id="run_name" name="run_name"
+             placeholder="dispatcher_mybatch  (auto-generated if blank)"
+             value="{{ form.run_name or '' }}">
+    </div>
+
+    <div class="form-row">
+      <label for="params">Parameters <span class="muted">(JSON)</span></label>
+      <textarea id="params" name="params" placeholder='{"input": "s3://bucket/samplesheet.csv", "outdir": "results"}'>{{ form.params or '' }}</textarea>
+    </div>
+
+    <button type="submit" class="btn btn-primary">🚀 Launch Pipeline</button>
+  </form>
+</div>
+{% endblock %}

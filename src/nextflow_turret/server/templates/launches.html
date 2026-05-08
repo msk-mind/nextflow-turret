@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Launches{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Pipeline Launches</h1>
+  <a href="/launch" class="btn btn-primary btn-sm">+ New Launch</a>
+</div>
+
+<div class="stat-grid">
+  <div class="stat"><div class="stat-label">Total</div><div class="stat-value">{{ launches | length }}</div></div>
+  <div class="stat"><div class="stat-label">Running</div><div class="stat-value" style="color:var(--accent)">{{ launches | selectattr('status','equalto','running') | list | length }}</div></div>
+  <div class="stat"><div class="stat-label">Succeeded</div><div class="stat-value" style="color:var(--success)">{{ launches | selectattr('status','equalto','succeeded') | list | length }}</div></div>
+  <div class="stat"><div class="stat-label">Failed</div><div class="stat-value" style="color:var(--danger)">{{ launches | selectattr('status','equalto','failed') | list | length }}</div></div>
+</div>
+
+<div class="card">
+  {% if launches %}
+  <table>
+    <thead>
+      <tr>
+        <th>Pipeline</th>
+        <th>Run Name</th>
+        <th>Profile</th>
+        <th>Status</th>
+        <th>Submitted</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for launch in launches %}
+      <tr>
+        <td class="mono" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ launch.pipeline }}">{{ launch.pipeline }}</td>
+        <td class="mono" style="font-size:12px;">{{ launch.run_name }}</td>
+        <td class="muted" style="font-size:12px;">{{ launch.profile or '—' }}</td>
+        <td><span class="badge badge-{{ launch.status }}">{{ launch.status }}</span></td>
+        <td class="muted" style="font-size:12px;">{{ launch.submitted_at | fmt_time }}</td>
+        <td><a href="/launches/{{ launch.launch_id }}">Details →</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">
+    <p style="font-size:16px;margin-bottom:8px;">No launches yet</p>
+    <p><a href="/launch">Submit your first pipeline →</a></p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const hasActive = {{ 'true' if launches | selectattr('status','equalto','running') | list | length > 0 else 'false' }};
+  if (hasActive) setTimeout(() => location.reload(), 5000);
+</script>
+{% endblock %}

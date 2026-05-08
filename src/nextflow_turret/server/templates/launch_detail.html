@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Launch {{ launch.launch_id[:8] }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="muted" style="font-size:12px;margin-bottom:4px;"><a href="/launches">← Launches</a></div>
+    <h1 class="page-title mono" style="font-size:18px;">{{ launch.pipeline }}</h1>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span class="badge badge-{{ launch.status }}" style="font-size:13px;padding:4px 12px;">{{ launch.status }}</span>
+    {% if launch.status in ('running', 'pending') %}
+    <form method="POST" action="/launches/{{ launch.launch_id }}/cancel" onsubmit="return confirm('Cancel this launch?')">
+      <button type="submit" class="btn btn-danger btn-sm">Cancel</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Launch Details</div>
+  <table>
+    <tr><td class="muted" style="width:140px;">Launch ID</td><td class="mono">{{ launch.launch_id }}</td></tr>
+    <tr><td class="muted">Pipeline</td><td class="mono">{{ launch.pipeline }}</td></tr>
+    <tr><td class="muted">Run Name</td><td class="mono">{{ launch.run_name }}</td></tr>
+    {% if launch.revision %}<tr><td class="muted">Revision</td><td class="mono">{{ launch.revision }}</td></tr>{% endif %}
+    {% if launch.profile  %}<tr><td class="muted">Profile</td><td class="mono">{{ launch.profile }}</td></tr>{% endif %}
+    {% if launch.work_dir %}<tr><td class="muted">Work Dir</td><td class="mono">{{ launch.work_dir }}</td></tr>{% endif %}
+    {% if launch.pid      %}<tr><td class="muted">PID</td><td class="mono">{{ launch.pid }}</td></tr>{% endif %}
+    {% if launch.exit_code is not none %}<tr><td class="muted">Exit Code</td><td class="mono {% if launch.exit_code != 0 %}{% endif %}">{{ launch.exit_code }}</td></tr>{% endif %}
+    <tr><td class="muted">Submitted</td><td>{{ launch.submitted_at | fmt_time }}</td></tr>
+    {% if launch.started_at  %}<tr><td class="muted">Started</td><td>{{ launch.started_at | fmt_time }}</td></tr>{% endif %}
+    {% if launch.finished_at %}<tr><td class="muted">Finished</td><td>{{ launch.finished_at | fmt_time }}</td></tr>{% endif %}
+  </table>
+</div>
+
+{% if launch.params %}
+<div class="card">
+  <div class="card-title">Parameters</div>
+  <pre style="font-family:var(--mono);font-size:12px;color:var(--text-dim);">{{ launch.params | tojson(indent=2) }}</pre>
+</div>
+{% endif %}
+
+{% if run %}
+<div class="card">
+  <div class="card-title">Workflow Progress</div>
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+    <div class="progress-wrap" style="flex:1;height:8px;border-radius:4px;">
+      <div class="progress-bar" style="width:{{ run.pct }}%;height:8px;border-radius:4px;"></div>
+    </div>
+    <span style="font-weight:700;">{{ run.pct }}%</span>
+  </div>
+  <div style="display:flex;gap:20px;font-size:13px;">
+    <span style="color:var(--success)">✓ {{ run.task_counts.get('succeeded', 0) }} succeeded</span>
+    <span style="color:var(--accent)">▶ {{ run.task_counts.get('running', 0) }} running</span>
+    {% if run.task_counts.get('failed', 0) %}
+    <span style="color:var(--danger)">✗ {{ run.task_counts.get('failed', 0) }} failed</span>
+    {% endif %}
+    <span class="muted">/ {{ run.total }} total</span>
+  </div>
+  <div style="margin-top:12px;"><a href="/runs/{{ run.workflow_id }}">View full run details →</a></div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+    <span>Log</span>
+    <a href="/api/launches/{{ launch.launch_id }}/log" target="_blank" class="muted" style="font-size:12px;text-transform:none;letter-spacing:0;">Raw ↗</a>
+  </div>
+  <pre class="log" id="log-output">{{ log }}</pre>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const isActive = {{ 'true' if launch.status in ('running', 'pending') else 'false' }};
+  if (isActive) {
+    // auto-scroll log to bottom initially
+    const logEl = document.getElementById('log-output');
+    if (logEl) logEl.scrollTop = logEl.scrollHeight;
+    setTimeout(() => location.reload(), 5000);
+  }
+</script>
+{% endblock %}

@@ -9,7 +9,23 @@ description = "In-process Nextflow Tower API shim — accumulate -with-tower tra
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
-dependencies = []   # stdlib only
+dependencies = []   # core is stdlib only
+
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+]
+dev = [
+    "pytest",
+    "httpx",          # required by FastAPI TestClient
+    "fastapi>=0.111", # needed to import server modules in tests
+]
+
+[project.scripts]
+turret = "nextflow_turret.server.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

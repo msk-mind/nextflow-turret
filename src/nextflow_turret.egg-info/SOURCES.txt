@@ -7,5 +7,16 @@ src/nextflow_turret/utils.py
 src/nextflow_turret.egg-info/PKG-INFO
 src/nextflow_turret.egg-info/SOURCES.txt
 src/nextflow_turret.egg-info/dependency_links.txt
+src/nextflow_turret.egg-info/entry_points.txt
+src/nextflow_turret.egg-info/requires.txt
 src/nextflow_turret.egg-info/top_level.txt
+src/nextflow_turret/db/__init__.py
+src/nextflow_turret/db/store.py
+src/nextflow_turret/launcher/__init__.py
+src/nextflow_turret/launcher/launcher.py
+src/nextflow_turret/server/__init__.py
+src/nextflow_turret/server/__main__.py
+src/nextflow_turret/server/app.py
+src/nextflow_turret/server/registry.py
+tests/test_server.py
 tests/test_turret.py

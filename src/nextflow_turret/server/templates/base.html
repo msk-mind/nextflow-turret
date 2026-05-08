@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nextflow Turret{% block title_suffix %}{% endblock %}</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0f1117;
+    --surface:  #1a1d27;
+    --border:   #2d3148;
+    --accent:   #4f8ef7;
+    --success:  #34d058;
+    --warning:  #f0a030;
+    --danger:   #e05050;
+    --muted:    #7c849c;
+    --text:     #e2e4ef;
+    --text-dim: #9da3ba;
+    --font: "Inter", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.6; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Layout */
+  .topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; gap: 24px; height: 52px; }
+  .topbar .logo { font-weight: 700; font-size: 16px; color: var(--text); letter-spacing: -0.3px; }
+  .topbar nav a { color: var(--text-dim); font-size: 13px; padding: 4px 0; }
+  .topbar nav a.active, .topbar nav a:hover { color: var(--text); }
+  .topbar .spacer { flex: 1; }
+  .main { max-width: 1200px; margin: 0 auto; padding: 28px 24px; }
+
+  /* Cards */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; margin-bottom: 16px; }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
+
+  /* Stat grid */
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; }
+  .stat-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+  .stat-value { font-size: 24px; font-weight: 700; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid var(--border); padding: 8px 12px; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* Progress bar */
+  .progress-wrap { background: var(--border); border-radius: 3px; height: 6px; width: 100%; min-width: 80px; }
+  .progress-bar  { height: 6px; border-radius: 3px; background: var(--accent); transition: width 0.3s; }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+  .badge-running   { background: rgba(79,142,247,0.15); color: var(--accent); }
+  .badge-succeeded { background: rgba(52,208,88,0.15);  color: var(--success); }
+  .badge-failed    { background: rgba(224,80,80,0.15);  color: var(--danger); }
+  .badge-cancelled { background: rgba(124,132,156,0.15);color: var(--muted); }
+  .badge-pending   { background: rgba(240,160,48,0.15); color: var(--warning); }
+  .badge-stalled   { background: rgba(240,160,48,0.15); color: var(--warning); }
+  .badge-complete  { background: rgba(52,208,88,0.15);  color: var(--success); }
+
+  /* Forms */
+  .form-row { margin-bottom: 16px; }
+  label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; font-weight: 500; }
+  input[type=text], input[type=url], textarea, select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); padding: 9px 12px; font-size: 14px;
+    font-family: var(--font); outline: none; transition: border-color 0.15s;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 90px; font-family: var(--mono); font-size: 13px; }
+  .btn { display: inline-block; padding: 9px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: opacity 0.15s; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn:hover { opacity: 0.85; }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+  .btn-danger { background: var(--danger); color: #fff; }
+
+  /* Misc */
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .muted { color: var(--text-dim); }
+  .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .page-title { font-size: 20px; font-weight: 700; }
+  .empty { text-align: center; padding: 48px 0; color: var(--muted); }
+  pre.log { background: #0a0c12; border: 1px solid var(--border); border-radius: 6px; padding: 16px; font-family: var(--mono); font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; max-height: 520px; overflow-y: auto; color: #c9d1d9; }
+  .alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; }
+  .alert-error { background: rgba(224,80,80,0.12); border: 1px solid var(--danger); color: var(--danger); }
+  .alert-success { background: rgba(52,208,88,0.12); border: 1px solid var(--success); color: var(--success); }
+  .process-table td:first-child { font-family: var(--mono); font-size: 12px; }
+  .failures-list { list-style: none; }
+  .failures-list li { padding: 8px 0; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 12px; }
+  .failures-list li:last-child { border-bottom: none; }
+
+  /* Auto-refresh indicator */
+  .refresh-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--success); margin-right: 6px; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="logo">🎯 Nextflow Turret</span>
+  <nav style="display:flex;gap:20px;">
+    <a href="/" class="{% if active_page == 'runs' %}active{% endif %}">Runs</a>
+    <a href="/launches" class="{% if active_page == 'launches' %}active{% endif %}">Launches</a>
+    <a href="/launch" class="{% if active_page == 'launch' %}active{% endif %}">+ New Launch</a>
+    <a href="/docs" target="_blank">API Docs</a>
+  </nav>
+  <div class="spacer"></div>
+</div>
+<div class="main">
+{% block content %}{% endblock %}
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -5,6 +5,15 @@ Summary: In-process Nextflow Tower API shim — accumulate -with-tower trace eve
 License: MIT
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
+Provides-Extra: server
+Requires-Dist: fastapi>=0.111; extra == "server"
+Requires-Dist: uvicorn[standard]>=0.29; extra == "server"
+Requires-Dist: jinja2>=3.1; extra == "server"
+Requires-Dist: python-multipart>=0.0.9; extra == "server"
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: httpx; extra == "dev"
+Requires-Dist: fastapi>=0.111; extra == "dev"
 
 # nextflow-turret
 

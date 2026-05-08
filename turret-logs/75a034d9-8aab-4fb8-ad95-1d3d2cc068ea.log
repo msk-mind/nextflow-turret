@@ -1,0 +1,8 @@
+# command: nextflow run org/p1 -with-tower http://localhost:8000 -name dispatcher_75a034d9-8aab-4fb8-ad95-1d3d2cc068ea
+
+
+ N E X T F L O W   ~  version 26.04.0
+
+Pulling org/p1 ...
+WARN: Cannot read project manifest -- Cause: Not authorized -- Check that the GitHub user name and password provided are correct
+Not authorized -- Check that the GitHub user name and password provided are correct

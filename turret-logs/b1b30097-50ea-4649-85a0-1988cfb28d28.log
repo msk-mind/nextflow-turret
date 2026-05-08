@@ -1,0 +1,8 @@
+# command: nextflow run org/test-pipeline -with-tower http://localhost:8000 -name dispatcher_b1b30097-50ea-4649-85a0-1988cfb28d28
+
+
+ N E X T F L O W   ~  version 26.04.0
+
+Pulling org/test-pipeline ...
+WARN: Cannot read project manifest -- Cause: Not authorized -- Check that the GitHub user name and password provided are correct
+Not authorized -- Check that the GitHub user name and password provided are correct
