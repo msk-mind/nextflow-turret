@@ -1,8 +1,0 @@
-# command: nextflow run https://github.com/example/pipeline -with-tower http://localhost:8000 -name dispatcher_4cc3b240-fef5-4c9e-b42b-b251e389211d -revision main -profile test --input data.csv
-
-
- N E X T F L O W   ~  version 26.04.0
-
-Pulling example/pipeline:main ...
-WARN: Cannot read project manifest -- Cause: Not authorized -- Check that the GitHub user name and password provided are correct
-Not authorized -- Check that the GitHub user name and password provided are correct
