@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+pip-wheel-metadata/
+.env
+.venv/
+venv/
+
+# Nextflow artifacts
+.nextflow/
+.nextflow.log
+.nextflow.log.*
+work/
+
+# Turret runtime files
+turret-logs/
+turret.db
+*.db
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
