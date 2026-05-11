@@ -15,6 +15,7 @@ State / registry::
 HTTP routing::
 
     from nextflow_turret import TowerRouter
+    from nextflow_turret import TowerHandlerMixin
     from nextflow_turret import user_info_response, trace_create_response
 
 Persistence::
@@ -49,6 +50,8 @@ from .handlers import (
     trace_create_response,
 )
 
+from .handler_mixin import TowerHandlerMixin
+
 from .db.store import RunStore
 from .server.registry import PersistentWorkflowRegistry
 
@@ -78,6 +81,7 @@ __all__ = [
     "evict_old",
     # HTTP routing
     "TowerRouter",
+    "TowerHandlerMixin",
     "user_info_response",
     "trace_create_response",
     # Persistence
