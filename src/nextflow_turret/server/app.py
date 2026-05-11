@@ -647,6 +647,8 @@ def create_app(
         entries = []
         try:
             for child in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+                if child.name.startswith("."):
+                    continue
                 try:
                     st = child.stat()
                     entries.append({
