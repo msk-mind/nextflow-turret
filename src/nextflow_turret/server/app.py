@@ -56,6 +56,7 @@ from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -70,6 +71,7 @@ from ..state import _task_counts_from_progress
 from .registry import PersistentWorkflowRegistry
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+_STATIC_DIR    = Path(__file__).parent / "static"
 
 # Param key validation — module-level constants (reused in form handler)
 _VALID_PARAM_KEY    = re.compile(r'^[\w][\w\-]*$')
@@ -460,6 +462,8 @@ def create_app(
     # applies to ALL responses including 401s from AuthMiddleware          #
     # ------------------------------------------------------------------ #
     app.add_middleware(SecurityHeadersMiddleware)
+
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     # ------------------------------------------------------------------ #
     # Route-level helpers (closures over app-scoped objects)               #
