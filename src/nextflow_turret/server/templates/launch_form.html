@@ -245,6 +245,24 @@
     const pipe = pipelineEl.value.trim();
     const dir  = projectDirEl.value.trim();
     cloneRow.style.display = (!_pipelineIsLocal(pipe) && pipe && dir) ? '' : 'none';
+    _updateConfigEditLink();
+  }
+
+  /* Show "Edit nextflow.config" link whenever project_dir is known */
+  function _updateConfigEditLink() {
+    const pipeline = pipelineEl.value.trim();
+    const local    = _pipelineIsLocal(pipeline);
+    const projDir  = local ? pipeline : projectDirEl.value.trim();
+    const revision = document.getElementById('revision').value.trim();
+    if (projDir) {
+      let href = '/config/edit?path=' + encodeURIComponent(projDir)
+               + '&pipeline=' + encodeURIComponent(pipeline);
+      if (revision) href += '&revision=' + encodeURIComponent(revision);
+      configEditAnchor.href        = href;
+      configEditLink.style.display = '';
+    } else {
+      configEditLink.style.display = 'none';
+    }
   }
 
   /* Called whenever the pipeline input changes — syncs dependent fields */
@@ -274,6 +292,7 @@
   pipelineEl.addEventListener('change', _onPipelineChange);
   projectDirEl.addEventListener('input', _updateCloneRow);
   projectDirEl.addEventListener('change', _updateCloneRow);
+  document.getElementById('revision').addEventListener('change', _updateConfigEditLink);
   // Run once on page load in case form is pre-filled
   _onPipelineChange();
 
@@ -301,10 +320,12 @@
         return;
       }
       cloneStatus.style.color = 'var(--success)';
-      cloneStatus.textContent = 'Cloned to ' + data.dest;
+      cloneStatus.textContent = 'Cloned to ' + data.dest + ' — reloading parameters…';
       // Switch pipeline field to the local clone and trigger change
       pipelineEl.value = data.dest;
       _onPipelineChange();
+      // Auto-reload parameters from the local clone
+      loadBtn.click();
     } catch (err) {
       cloneStatus.style.color = 'var(--danger)';
       cloneStatus.textContent = 'Network error: ' + err.message;
@@ -419,18 +440,7 @@
         ? ' ' + data.profiles.length + ' profiles found.'
         : '';
       statusEl.textContent = 'Loaded ' + data.params.length + ' parameters from ' + data.source + '.' + profileSuffix;
-
-      // Show "Edit nextflow.config" link — use local pipeline path directly as projDir when local
-      const pipeline = pipelineEl.value.trim();
-      const revision = document.getElementById('revision').value.trim();
-      const projDir  = _pipelineIsLocal(pipeline) ? pipeline : projectDirEl.value.trim();
-      if (projDir) {
-        let href = '/config/edit?path=' + encodeURIComponent(projDir)
-                 + '&pipeline=' + encodeURIComponent(pipeline);
-        if (revision) href += '&revision=' + encodeURIComponent(revision);
-        configEditAnchor.href = href;
-        configEditLink.style.display = '';
-      }
+      _updateConfigEditLink();
 
     } catch (_err) {
       statusEl.textContent  = 'Error fetching pipeline info - enter parameters as JSON below.';
