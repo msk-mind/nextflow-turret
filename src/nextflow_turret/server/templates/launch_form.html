@@ -56,7 +56,7 @@
         <input type="text" id="project_dir" name="project_dir"
                placeholder="Leave blank to auto-organise under ~/.turret/uploads"
                value="{{ form.project_dir or '' }}">
-        <button type="button" class="btn btn-secondary btn-sm fs-browse-btn"
+        <button type="button" id="project-dir-browse-btn" class="btn btn-secondary btn-sm fs-browse-btn"
                 data-target="project_dir" data-mode="dir" title="Browse filesystem">&#128193;</button>
       </div>
       <small class="muted" id="project-dir-hint">Uploaded files and <code>nextflow.config</code> are placed here.</small>
@@ -272,6 +272,8 @@
     }
   }
 
+  const projectDirBrowseBtn = document.getElementById('project-dir-browse-btn');
+
   /* Called whenever the pipeline input changes — syncs dependent fields */
   function _onPipelineChange() {
     const val = pipelineEl.value.trim();
@@ -279,16 +281,18 @@
     // Revision / branch / tag is not relevant for local directories
     revisionRow.style.display = local ? 'none' : '';
     if (local) {
-      // Project dir is the pipeline dir itself — lock the field
+      // Project dir is the pipeline dir itself — lock the field and hide browse btn
       projectDirEl.value    = val;
       projectDirEl.readOnly = true;
       projectDirEl.style.opacity = '0.6';
+      projectDirBrowseBtn.style.display = 'none';
       projectDirHint.innerHTML =
         '<strong>Using pipeline directory as project directory.</strong> ' +
         'Files and config will be placed inside the local pipeline path.';
     } else {
       projectDirEl.readOnly = false;
       projectDirEl.style.opacity = '';
+      projectDirBrowseBtn.style.display = '';
       projectDirHint.innerHTML =
         'Uploaded files and <code>nextflow.config</code> are placed here.';
     }
