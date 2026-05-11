@@ -65,7 +65,7 @@ from ..auth import AuthConfig, AuthManager, AuthMiddleware, AuthMode, safe_next_
 from ..handlers import TowerRouter
 from ..db.store import RunStore
 from ..launcher.launcher import Launcher
-from ..schema import fetch_pipeline_schema
+from ..schema import fetch_pipeline_schema, fetch_pipeline_profiles
 from ..state import _task_counts_from_progress
 from .registry import PersistentWorkflowRegistry
 
@@ -596,12 +596,24 @@ def create_app(
         pipeline: str           = Query(...,      description="Pipeline identifier (e.g. nf-core/rnaseq)"),
         revision: Optional[str] = Query(default=None, description="Git revision / tag"),
     ):
-        """Return parameter specs from the pipeline's nextflow_schema.json."""
-        params = fetch_pipeline_schema(pipeline, revision)
+        """Return parameter specs and available profiles for a pipeline.
+
+        Fetches ``nextflow_schema.json`` for parameters and ``nextflow.config``
+        for profile names in parallel.  Both are returned even if only one
+        is found.
+        """
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            params_future   = pool.submit(fetch_pipeline_schema,  pipeline, revision)
+            profiles_future = pool.submit(fetch_pipeline_profiles, pipeline, revision)
+            params   = params_future.result()
+            profiles = profiles_future.result()
+
         return {
-            "params": [p.to_dict() for p in params],
-            "count":  len(params),
-            "source": "nextflow_schema.json" if params else None,
+            "params":   [p.to_dict() for p in params],
+            "count":    len(params),
+            "profiles": profiles,
+            "source":   "nextflow_schema.json" if params else None,
         }
 
     # ------------------------------------------------------------------ #
