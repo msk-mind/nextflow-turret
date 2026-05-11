@@ -190,7 +190,7 @@ class RunStore:
             rows = self._conn.execute(
                 "SELECT * FROM launches ORDER BY submitted_at DESC"
             ).fetchall()
-        return [self._launch_row_to_dict(r) for r in rows]
+        return [self._row_to_dict_with_json_fields(r, ("params",)) for r in rows]
 
     def get_launch(self, launch_id: str) -> Optional[dict]:
         """Return a single launch by launch_id, or ``None``."""
@@ -198,22 +198,23 @@ class RunStore:
             row = self._conn.execute(
                 "SELECT * FROM launches WHERE launch_id = ?", (launch_id,)
             ).fetchone()
-        return self._launch_row_to_dict(row) if row else None
+        return self._row_to_dict_with_json_fields(row, ("params",)) if row else None
 
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _row_to_dict(row: sqlite3.Row) -> dict:
+    def _row_to_dict_with_json_fields(row: sqlite3.Row, json_fields: tuple) -> dict:
+        """Convert a sqlite3.Row to a dict, deserialising the named JSON fields."""
         d = dict(row)
-        d["complete"]    = bool(d["complete"])
-        d["task_counts"] = json.loads(d["task_counts"])
-        d["processes"]   = json.loads(d["processes"])
-        d["resources"]   = json.loads(d["resources"])
-        d["failures"]    = json.loads(d["failures"])
+        for field in json_fields:
+            if field in d:
+                d[field] = json.loads(d[field])
         return d
 
     @staticmethod
-    def _launch_row_to_dict(row: sqlite3.Row) -> dict:
-        d = dict(row)
-        d["params"] = json.loads(d["params"])
+    def _row_to_dict(row: sqlite3.Row) -> dict:
+        d = RunStore._row_to_dict_with_json_fields(
+            row, ("task_counts", "processes", "resources", "failures")
+        )
+        d["complete"] = bool(d["complete"])
         return d

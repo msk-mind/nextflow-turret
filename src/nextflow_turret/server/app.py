@@ -62,9 +62,14 @@ from ..handlers import TowerRouter
 from ..db.store import RunStore
 from ..launcher.launcher import Launcher
 from ..schema import fetch_pipeline_schema
+from ..state import _task_counts_from_progress
 from .registry import PersistentWorkflowRegistry
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+# Param key validation — module-level constants (reused in form handler)
+_VALID_PARAM_KEY    = re.compile(r'^[\w][\w\-]*$')
+_MAX_PARAMS_JSON_BYTES = 100_000
 
 
 # ---------------------------------------------------------------------------
@@ -220,15 +225,24 @@ class LaunchRequest(BaseModel):
     run_name:   Optional[str] = None
 
 
+def _compute_display_status(run: dict) -> str:
+    """Return a display status string for a Tower run dict."""
+    if run["complete"]:
+        return "complete"
+    if run.get("stalled"):
+        return "stalled"
+    return "running"
+
+
 def _enrich_run(state: dict) -> dict:
     """Add derived fields used by templates."""
-    tc = state.get("task_counts") or {}
-    succeeded = tc.get("succeeded", 0)
-    cached    = tc.get("cached", 0)
-    failed    = tc.get("failed", 0)
-    running   = tc.get("running", 0)
-    pending   = tc.get("pending", 0)
-    submitted = tc.get("submitted", 0)
+    tc        = _task_counts_from_progress(state.get("task_counts") or {})
+    succeeded = tc["succeeded"]
+    cached    = tc["cached"]
+    failed    = tc["failed"]
+    running   = tc["running"]
+    pending   = tc["pending"]
+    submitted = tc["submitted"]
 
     done  = succeeded + cached
     total = done + failed + running + pending + submitted
@@ -303,12 +317,7 @@ def _build_pipeline_rows(launcher: "Launcher", registry: "PersistentWorkflowRegi
 
         # Unified status badge
         if run:
-            if run["complete"]:
-                row["display_status"] = "complete"
-            elif run.get("stalled"):
-                row["display_status"] = "stalled"
-            else:
-                row["display_status"] = "running"
+            row["display_status"] = _compute_display_status(run)
         else:
             row["display_status"] = launch["status"]  # pending / running / failed / cancelled
 
@@ -339,7 +348,7 @@ def _build_pipeline_rows(launcher: "Launcher", registry: "PersistentWorkflowRegi
             "task_counts":   run["task_counts"],
             "started_at":    run.get("started_at"),
             "failures":      run.get("failures", []),
-            "display_status": "complete" if run["complete"] else ("stalled" if run.get("stalled") else "running"),
+            "display_status": _compute_display_status(run),
         })
 
     rows.sort(key=lambda r: r.get("submitted_at") or r.get("started_at") or 0, reverse=True)
@@ -417,6 +426,35 @@ def create_app(
     app.add_middleware(SecurityHeadersMiddleware)
 
     # ------------------------------------------------------------------ #
+    # Route-level helpers (closures over app-scoped objects)               #
+    # ------------------------------------------------------------------ #
+
+    def _get_launch_or_404(launch_id: str):
+        """Return a launch record or raise HTTP 404."""
+        record = launcher.get(launch_id)
+        if record is None:
+            raise HTTPException(404, detail="Launch not found")
+        return record
+
+    def _error_launch_form_response(request: Request, error: str, form_data: dict, status_code: int = 422):
+        """Return a launch form template response with an error message."""
+        return templates.TemplateResponse(
+            request,
+            "launch_form.html",
+            {"form": form_data, "error": error, "active_page": "launch"},
+            status_code=status_code,
+        )
+
+    def _error_login_response(request: Request, next_url: str, error: str, status_code: int = 401):
+        """Return a login form template response with an error message."""
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"next": next_url, "error": error, "active_page": None},
+            status_code=status_code,
+        )
+
+    # ------------------------------------------------------------------ #
     # Tower trace endpoints                                                #
     # ------------------------------------------------------------------ #
 
@@ -491,10 +529,7 @@ def create_app(
     @app.get("/api/launches/{launch_id}", tags=["api"])
     async def get_launch(launch_id: str):
         """Return current status of a single launch."""
-        record = launcher.get(launch_id)
-        if record is None:
-            raise HTTPException(404, detail="Launch not found")
-        return record.as_dict()
+        return _get_launch_or_404(launch_id).as_dict()
 
     @app.get("/api/launches/{launch_id}/log", tags=["api"], response_class=PlainTextResponse)
     async def get_launch_log(
@@ -502,17 +537,13 @@ def create_app(
         tail: Optional[int] = Query(default=None, description="Return only the last N lines"),
     ):
         """Return the stdout/stderr log for a launch."""
-        record = launcher.get(launch_id)
-        if record is None:
-            raise HTTPException(404, detail="Launch not found")
+        _get_launch_or_404(launch_id)
         return PlainTextResponse(launcher.read_log(launch_id, tail=tail))
 
     @app.delete("/api/launches/{launch_id}", tags=["api"])
     async def cancel_launch(launch_id: str):
         """Cancel a running pipeline launch (sends SIGTERM)."""
-        record = launcher.get(launch_id)
-        if record is None:
-            raise HTTPException(404, detail="Launch not found")
+        _get_launch_or_404(launch_id)
         sent = launcher.cancel(launch_id)
         if not sent:
             raise HTTPException(409, detail="Launch is not in a cancellable state")
@@ -595,12 +626,8 @@ def create_app(
             "run_name": run_name, "params": params,
         }
         # Collect individual param__KEY fields from the form
-        raw_form   = await request.form()
+        raw_form      = await request.form()
         parsed_params: dict = {}
-
-        # Param key validation: only word characters and hyphens (safe for CLI args)
-        _VALID_PARAM_KEY = re.compile(r'^[\w][\w\-]*$')
-        _MAX_PARAMS_JSON_BYTES = 100_000
 
         def _validate_param_key(key: str) -> bool:
             return bool(_VALID_PARAM_KEY.match(key))
@@ -613,23 +640,15 @@ def create_app(
         }
         invalid_keys = [k for k in individual if not _validate_param_key(k)]
         if invalid_keys:
-            return templates.TemplateResponse(
-                request,
-                "launch_form.html",
-                {"form": form_data, "error": f"Invalid parameter name(s): {', '.join(invalid_keys)}", "active_page": "launch"},
-                status_code=422,
+            return _error_launch_form_response(
+                request, f"Invalid parameter name(s): {', '.join(invalid_keys)}", form_data
             )
         if individual:
             parsed_params = individual
         elif params and params.strip():
             # Priority 2: legacy JSON textarea fallback
             if len(params.encode()) > _MAX_PARAMS_JSON_BYTES:
-                return templates.TemplateResponse(
-                    request,
-                    "launch_form.html",
-                    {"form": form_data, "error": "params JSON exceeds maximum size", "active_page": "launch"},
-                    status_code=422,
-                )
+                return _error_launch_form_response(request, "params JSON exceeds maximum size", form_data)
             try:
                 parsed_params = json.loads(params)
                 if not isinstance(parsed_params, dict):
@@ -638,12 +657,7 @@ def create_app(
                 if invalid_keys:
                     raise ValueError(f"Invalid parameter name(s): {', '.join(invalid_keys)}")
             except Exception as exc:
-                return templates.TemplateResponse(
-                    request,
-                    "launch_form.html",
-                    {"form": form_data, "error": f"Invalid params JSON: {exc}", "active_page": "launch"},
-                    status_code=422,
-                )
+                return _error_launch_form_response(request, f"Invalid params JSON: {exc}", form_data)
 
         # Sanitise empty strings to None
         revision = revision or None
@@ -665,9 +679,7 @@ def create_app(
 
     @app.get("/launches/{launch_id}", response_class=HTMLResponse, tags=["ui"], include_in_schema=False)
     async def ui_launch_detail(launch_id: str, request: Request):
-        record = launcher.get(launch_id)
-        if record is None:
-            raise HTTPException(404, detail="Launch not found")
+        record = _get_launch_or_404(launch_id)
         launch = record.as_dict()
         log    = launcher.read_log(launch_id, tail=200)
 
@@ -696,9 +708,7 @@ def create_app(
         csrf_token_field: Optional[str] = Form(default=None, alias="_csrf_token"),
     ):
         _csrf_validate(request, csrf_token_field)
-        record = launcher.get(launch_id)
-        if record is None:
-            raise HTTPException(404)
+        _get_launch_or_404(launch_id)
         launcher.cancel(launch_id)
         return RedirectResponse(url=f"/launches/{launch_id}", status_code=303)
 
@@ -738,22 +748,15 @@ def create_app(
         _csrf_validate(request, csrf_token_field)
         # Rate limiting: check before verifying credentials
         if not _login_rate_limiter.check_and_record(request):
-            return templates.TemplateResponse(
-                request,
-                "login.html",
-                {"next": safe_next_url(next, default="/"), "error": "Too many login attempts. Please wait and try again.", "active_page": None},
-                status_code=429,
+            return _error_login_response(
+                request, safe_next_url(next, default="/"),
+                "Too many login attempts. Please wait and try again.", 429,
             )
         # Validate next before use
         destination = safe_next_url(next, default="/")
         user = auth_mgr.verify_basic_credentials(username, password)
         if user is None:
-            return templates.TemplateResponse(
-                request,
-                "login.html",
-                {"next": destination, "error": "Invalid username or password", "active_page": None},
-                status_code=401,
-            )
+            return _error_login_response(request, destination, "Invalid username or password", 401)
         _login_rate_limiter.reset(request)
         auth_mgr.set_user(request, user)
         return RedirectResponse(destination, status_code=303)
