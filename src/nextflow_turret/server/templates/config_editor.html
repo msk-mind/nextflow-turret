@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title_suffix %} &mdash; Edit nextflow.config{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+  <h1 class="page-title" style="margin:0;">Edit <code>nextflow.config</code></h1>
+  <span class="muted" style="font-size:0.875rem;word-break:break-all;">{{ project_dir }}/nextflow.config</span>
+</div>
+
+<div class="card" style="max-width:900px;">
+  <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;">
+    {% if pipeline %}
+    <button id="fetch-btn" type="button" class="btn btn-secondary btn-sm">
+      &#8635; Fetch from pipeline
+    </button>
+    {% endif %}
+    <button id="save-btn" type="button" class="btn btn-primary btn-sm">&#128190; Save</button>
+    <span id="save-status" class="muted" style="font-size:0.875rem;"></span>
+  </div>
+
+  <textarea id="config-editor"
+            spellcheck="false"
+            autocomplete="off"
+            autocorrect="off"
+            style="width:100%;min-height:520px;font-family:monospace;font-size:0.875rem;
+                   background:var(--surface);color:var(--text);border:1px solid var(--border);
+                   border-radius:4px;padding:0.75rem;resize:vertical;tab-size:2;
+                   white-space:pre;overflow:auto;box-sizing:border-box;"
+  ></textarea>
+</div>
+
+<script>
+(function () {
+  const editor     = document.getElementById('config-editor');
+  const saveBtn    = document.getElementById('save-btn');
+  const saveStatus = document.getElementById('save-status');
+  const fetchBtn   = document.getElementById('fetch-btn');
+
+  const projectDir = {{ project_dir | tojson }};
+  const pipeline   = {{ pipeline   | tojson }};
+  const revision   = {{ revision   | tojson }};
+
+  function setStatus(msg, ok) {
+    saveStatus.textContent = msg;
+    saveStatus.style.color = ok ? 'var(--success)' : 'var(--danger)';
+    if (ok) setTimeout(() => { saveStatus.textContent = ''; }, 3000);
+  }
+
+  async function loadConfig() {
+    let url = '/api/config?path=' + encodeURIComponent(projectDir);
+    if (pipeline) url += '&pipeline=' + encodeURIComponent(pipeline);
+    if (revision) url += '&revision=' + encodeURIComponent(revision);
+    try {
+      const resp = await fetch(url);
+      const data = await resp.json();
+      editor.value = data.content || '';
+      if (data.source === 'pipeline') {
+        setStatus('Fetched from pipeline (not yet saved)', true);
+      }
+    } catch (err) {
+      setStatus('Failed to load: ' + err.message, false);
+    }
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    setStatus('Saving...', true);
+    try {
+      const resp = await fetch('/api/config?path=' + encodeURIComponent(projectDir), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: editor.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Save failed');
+      setStatus('Saved to ' + data.path, true);
+    } catch (err) {
+      setStatus('Error: ' + err.message, false);
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  if (fetchBtn) {
+    fetchBtn.addEventListener('click', async () => {
+      fetchBtn.disabled = true;
+      setStatus('Fetching...', true);
+      try {
+        // Fetch directly from the pipeline remote (ignore local file)
+        let url = '/api/config/remote?pipeline=' + encodeURIComponent(pipeline);
+        if (revision) url += '&revision=' + encodeURIComponent(revision);
+        const resp = await fetch(url);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'Fetch failed');
+        editor.value = data.content || '';
+        setStatus('Fetched from pipeline (not yet saved)', true);
+      } catch (err) {
+        setStatus('Fetch failed: ' + err.message, false);
+      } finally {
+        fetchBtn.disabled = false;
+      }
+    });
+  }
+
+  // Allow Tab key to insert spaces rather than lose focus
+  editor.addEventListener('keydown', e => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = editor.selectionStart;
+      const end   = editor.selectionEnd;
+      editor.value = editor.value.slice(0, start) + '    ' + editor.value.slice(end);
+      editor.selectionStart = editor.selectionEnd = start + 4;
+    }
+  });
+
+  loadConfig();
+})();
+</script>
+{% endblock %}

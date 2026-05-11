@@ -366,6 +366,37 @@ def fetch_pipeline_refs(
     return {"branches": branches, "tags": tags}
 
 
+def fetch_pipeline_config_text(
+    pipeline: str,
+    revision: Optional[str] = None,
+    timeout:  int           = 8,
+) -> str:
+    """Return the raw text of ``nextflow.config`` for a pipeline.
+
+    Returns an empty string when the config cannot be fetched.
+    """
+    if pipeline.startswith("/") or pipeline.startswith("."):
+        config_file = Path(pipeline) / "nextflow.config"
+        if config_file.is_file():
+            try:
+                return config_file.read_text(errors="replace")
+            except OSError:
+                pass
+        return ""
+
+    url = _resolve_config_url(pipeline, revision)
+    if url is None:
+        return ""
+
+    text = _fetch_text_url(url, timeout=timeout)
+    if text is None and (not revision or revision == "main"):
+        text = _fetch_text_url(
+            _resolve_config_url(pipeline, "master") or url,
+            timeout=timeout,
+        )
+    return text or ""
+
+
 def fetch_pipeline_profiles(
     pipeline: str,
     revision: Optional[str] = None,

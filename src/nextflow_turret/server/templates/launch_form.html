@@ -47,6 +47,18 @@
     </div>
 
     <div class="form-row">
+      <label for="project_dir">Project Directory</label>
+      <div class="param-input-row">
+        <input type="text" id="project_dir" name="project_dir"
+               placeholder="Leave blank to auto-organise under ~/.turret/uploads"
+               value="{{ form.project_dir or '' }}">
+        <button type="button" class="btn btn-secondary btn-sm fs-browse-btn"
+                data-target="project_dir" data-mode="dir" title="Browse filesystem">&#128193;</button>
+      </div>
+      <small class="muted">Uploaded files and <code>nextflow.config</code> are placed here.</small>
+    </div>
+
+    <div class="form-row">
       <label for="work_dir">Work Directory</label>
       <div class="param-input-row">
         <input type="text" id="work_dir" name="work_dir"
@@ -65,6 +77,11 @@
     </div>
 
     <div id="schema-status" style="display:none;" class="muted" aria-live="polite"></div>
+    <div id="config-edit-link" style="display:none;margin-top:0.5rem;">
+      <a id="config-edit-anchor" href="#" target="_blank" class="btn btn-secondary btn-sm">
+        &#128196; Edit nextflow.config
+      </a>
+    </div>
 
     <div id="schema-params" style="display:none;">
       <hr style="margin:1.25rem 0;">
@@ -184,6 +201,9 @@
   const profileInput = document.getElementById('profile');
   const revisionList = document.getElementById('revision-list');
   const pipelineEl   = document.getElementById('pipeline');
+  const projectDirEl = document.getElementById('project_dir');
+  const configEditLink   = document.getElementById('config-edit-link');
+  const configEditAnchor = document.getElementById('config-edit-anchor');
 
   function _selectedProfiles() {
     return profileInput.value.split(',').map(s => s.trim()).filter(Boolean);
@@ -291,6 +311,18 @@
         ? ' ' + data.profiles.length + ' profiles found.'
         : '';
       statusEl.textContent = 'Loaded ' + data.params.length + ' parameters from ' + data.source + '.' + profileSuffix;
+
+      // Show "Edit nextflow.config" link
+      const pipeline = pipelineEl.value.trim();
+      const revision = document.getElementById('revision').value.trim();
+      const projDir  = projectDirEl.value.trim();
+      if (projDir) {
+        let href = '/config/edit?path=' + encodeURIComponent(projDir)
+                 + '&pipeline=' + encodeURIComponent(pipeline);
+        if (revision) href += '&revision=' + encodeURIComponent(revision);
+        configEditAnchor.href = href;
+        configEditLink.style.display = '';
+      }
 
     } catch (_err) {
       statusEl.textContent  = 'Error fetching pipeline info - enter parameters as JSON below.';
@@ -422,7 +454,6 @@
     const runName  = (document.getElementById('run_name')  || {}).value || '';
     const pipeline = (document.getElementById('pipeline')  || {}).value || '';
     const raw = (runName || pipeline).trim();
-    // Sanitise to a safe directory name: keep alphanumeric, dash, underscore, dot
     return raw.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^[._]+/, '').slice(0, 64) || '';
   }
 
@@ -444,8 +475,14 @@
       try {
         const fd = new FormData();
         fd.append('file', file);
-        const project = getProjectSlug();
-        const url = '/api/fs/upload' + (project ? '?project=' + encodeURIComponent(project) : '');
+        const projDir = projectDirEl ? projectDirEl.value.trim() : '';
+        let url;
+        if (projDir) {
+          url = '/api/fs/upload?dir=' + encodeURIComponent(projDir);
+        } else {
+          const project = getProjectSlug();
+          url = '/api/fs/upload' + (project ? '?project=' + encodeURIComponent(project) : '');
+        }
         const resp = await fetch(url, { method: 'POST', body: fd });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || 'Upload failed');

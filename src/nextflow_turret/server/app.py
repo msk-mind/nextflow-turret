@@ -65,7 +65,7 @@ from ..auth import AuthConfig, AuthManager, AuthMiddleware, AuthMode, safe_next_
 from ..handlers import TowerRouter
 from ..db.store import RunStore
 from ..launcher.launcher import Launcher
-from ..schema import fetch_pipeline_schema, fetch_pipeline_profiles, fetch_pipeline_refs
+from ..schema import fetch_pipeline_schema, fetch_pipeline_profiles, fetch_pipeline_refs, fetch_pipeline_config_text
 from ..state import _task_counts_from_progress
 from .registry import PersistentWorkflowRegistry
 
@@ -711,16 +711,17 @@ def create_app(
 
     @app.post("/api/fs/upload", tags=["api"])
     async def fs_upload(
-        file:    UploadFile = File(...),
-        project: str        = Query(default="", description="Project subdirectory for the uploaded file"),
+        file:       UploadFile      = File(...),
+        project:    str             = Query(default="", description="Project subdirectory for the uploaded file"),
+        upload_dir: Optional[str]   = Query(default=None, alias="dir", description="Explicit destination directory (overrides project)"),
     ):
         """Upload a file to the server-side upload directory.
 
-        Files are stored under ``<upload_dir>/<project>/`` when *project* is
-        supplied, or ``<upload_dir>/<YYYY-MM-DD>/`` when it is not.  A numeric
-        suffix is appended to the filename if a collision occurs.  The response
-        contains the absolute path, which can be passed directly as a pipeline
-        parameter value.
+        If *dir* is supplied the file is placed directly in that directory
+        (must be under an allowed browse root).  Otherwise files are stored
+        under ``<upload_dir>/<project>/`` when *project* is supplied, or
+        ``<upload_dir>/<YYYY-MM-DD>/`` when neither is given.  A numeric
+        suffix is appended to the filename if a collision occurs.
         """
         if not file.filename:
             raise HTTPException(400, detail="No filename provided")
@@ -729,14 +730,18 @@ def create_app(
         if not safe_name or safe_name in (".", ".."):
             raise HTTPException(400, detail="Invalid filename")
 
-        # Resolve project subdirectory
-        if project:
-            # Strip any path separators so callers can't escape the upload root
+        # Resolve destination directory
+        if upload_dir:
+            dest_dir = Path(upload_dir).resolve()
+            _assert_under_root(dest_dir)
+            safe_project = dest_dir.name
+        elif project:
             safe_project = re.sub(r'[/\\]', '_', project.strip()).strip("._") or "default"
+            dest_dir = _upload_dir / safe_project
         else:
             safe_project = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+            dest_dir = _upload_dir / safe_project
 
-        dest_dir = _upload_dir / safe_project
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         dest = dest_dir / safe_name
@@ -757,6 +762,77 @@ def create_app(
 
         return {"path": str(dest), "filename": dest.name, "size": dest.stat().st_size, "project": safe_project}
 
+    # ------------------------------------------------------------------ #
+    # Config editor endpoints                                              #
+    # ------------------------------------------------------------------ #
+
+    @app.get("/api/config", tags=["api"])
+    async def get_config(
+        path:     str           = Query(..., description="Project directory containing nextflow.config"),
+        pipeline: Optional[str] = Query(default=None),
+        revision: Optional[str] = Query(default=None),
+    ):
+        """Return nextflow.config content from the project directory.
+
+        Falls back to fetching from the pipeline remote when the file does not
+        yet exist locally.
+        """
+        config_path = Path(path) / "nextflow.config"
+        if config_path.is_file():
+            return {"content": config_path.read_text(errors="replace"), "source": "local", "path": str(config_path)}
+        if pipeline:
+            text = fetch_pipeline_config_text(pipeline, revision)
+            if text:
+                return {"content": text, "source": "pipeline", "path": str(config_path)}
+        return {"content": "", "source": "empty", "path": str(config_path)}
+
+    @app.post("/api/config", tags=["api"])
+    async def save_config(
+        path:    str     = Query(..., description="Project directory where nextflow.config will be written"),
+        request: Request = None,
+    ):
+        """Write nextflow.config content to the project directory."""
+        body    = await request.json()
+        content = body.get("content", "")
+        dir_path = Path(path).resolve()
+        _assert_under_root(dir_path)
+        dir_path.mkdir(parents=True, exist_ok=True)
+        config_path = dir_path / "nextflow.config"
+        try:
+            config_path.write_text(content)
+        except OSError as exc:
+            raise HTTPException(500, detail=f"Failed to save config: {exc}") from exc
+        return {"saved": True, "path": str(config_path)}
+
+    @app.get("/api/config/remote", tags=["api"])
+    async def get_config_remote(
+        pipeline: str           = Query(...),
+        revision: Optional[str] = Query(default=None),
+    ):
+        """Fetch nextflow.config directly from the pipeline remote (no local cache)."""
+        text = fetch_pipeline_config_text(pipeline, revision)
+        if not text:
+            raise HTTPException(404, detail="Could not fetch nextflow.config from pipeline")
+        return {"content": text}
+
+    @app.get("/config/edit", response_class=HTMLResponse, tags=["ui"], include_in_schema=False)
+    async def ui_config_editor(
+        path:     str           = Query(...),
+        pipeline: Optional[str] = Query(default=None),
+        revision: Optional[str] = Query(default=None),
+        request:  Request       = None,
+    ):
+        """Config editor page for nextflow.config in the given project directory."""
+        return templates.TemplateResponse(
+            request,
+            "config_editor.html",
+            {
+                "project_dir": path,
+                "pipeline":    pipeline or "",
+                "revision":    revision or "",
+                "active_page": "launch",
+            },
+        )
 
 
     def _pipelines_context(request: Request) -> dict:
@@ -804,12 +880,13 @@ def create_app(
     @app.post("/launch", response_class=HTMLResponse, tags=["ui"], include_in_schema=False)
     async def ui_launch_submit(
         request: Request,
-        pipeline:    str           = Form(...),
-        revision:    Optional[str] = Form(default=None),
-        profile:     Optional[str] = Form(default=None),
-        work_dir:    Optional[str] = Form(default=None),
-        run_name:    Optional[str] = Form(default=None),
-        params:      Optional[str] = Form(default=None),
+        pipeline:     str           = Form(...),
+        revision:     Optional[str] = Form(default=None),
+        profile:      Optional[str] = Form(default=None),
+        work_dir:     Optional[str] = Form(default=None),
+        run_name:     Optional[str] = Form(default=None),
+        project_dir:  Optional[str] = Form(default=None),
+        params:       Optional[str] = Form(default=None),
         csrf_token_field: Optional[str] = Form(default=None, alias="_csrf_token"),
     ):
         _csrf_validate(request, csrf_token_field)
@@ -817,6 +894,7 @@ def create_app(
             "pipeline": pipeline, "revision": revision,
             "profile": profile, "work_dir": work_dir,
             "run_name": run_name, "params": params,
+            "project_dir": project_dir,
         }
         # Collect individual param__KEY fields from the form
         raw_form      = await request.form()
