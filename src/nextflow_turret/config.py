@@ -16,7 +16,7 @@ Example ``turret.toml``::
     port         = 8000
     db           = "/data/turret.db"
     log_dir      = "/data/turret-logs"
-    upload_dir   = "/data/turret-uploads"   # where uploaded parameter files are stored
+    upload_dir   = "/data/turret-uploads"   # root for uploaded files; auto-created if absent
     browse_roots = ["/data", "/scratch"]    # directories users may browse in the UI
 
     [launcher]

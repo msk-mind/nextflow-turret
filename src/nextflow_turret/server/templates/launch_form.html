@@ -323,6 +323,14 @@
   }
 
   /* == File upload (AJAX) == */
+  function getProjectSlug() {
+    const runName  = (document.getElementById('run_name')  || {}).value || '';
+    const pipeline = (document.getElementById('pipeline')  || {}).value || '';
+    const raw = (runName || pipeline).trim();
+    // Sanitise to a safe directory name: keep alphanumeric, dash, underscore, dot
+    return raw.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^[._]+/, '').slice(0, 64) || '';
+  }
+
   function triggerUpload(targetInput) {
     const picker = document.createElement('input');
     picker.type  = 'file';
@@ -341,7 +349,9 @@
       try {
         const fd = new FormData();
         fd.append('file', file);
-        const resp = await fetch('/api/fs/upload', { method: 'POST', body: fd });
+        const project = getProjectSlug();
+        const url = '/api/fs/upload' + (project ? '?project=' + encodeURIComponent(project) : '');
+        const resp = await fetch(url, { method: 'POST', body: fd });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || 'Upload failed');
         targetInput.value = data.path;

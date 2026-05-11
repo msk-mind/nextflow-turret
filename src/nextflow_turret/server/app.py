@@ -47,7 +47,6 @@ import re
 import secrets
 import shutil
 import stat
-import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -399,9 +398,12 @@ def create_app(
         ``/api/fs/browse`` endpoint.  Defaults to ``default_work_dir`` (if
         set) plus the current user's home directory.
     upload_dir:
-        Directory where files uploaded via ``POST /api/fs/upload`` are
+        Root directory where files uploaded via ``POST /api/fs/upload`` are
         stored.  Defaults to a ``turret-uploads`` sub-directory of
-        ``default_work_dir`` if set, otherwise the system temp directory.
+        ``default_work_dir`` if set, otherwise ``~/.turret/uploads``.
+        Individual uploads are placed in a project subdirectory
+        (``<upload_dir>/<project>/``) when the ``project`` query parameter
+        is supplied; otherwise a date-stamped subdirectory is auto-generated.
     """
     if auth_config is None:
         auth_config = AuthConfig()
@@ -421,7 +423,7 @@ def create_app(
     elif default_work_dir:
         _upload_dir = Path(default_work_dir).resolve() / "turret-uploads"
     else:
-        _upload_dir = Path(tempfile.gettempdir()) / "turret-uploads"
+        _upload_dir = Path.home() / ".turret" / "uploads"
     _upload_dir.mkdir(parents=True, exist_ok=True)
     # upload dir is implicitly also browseable
     if _upload_dir not in _resolved_roots:
@@ -689,29 +691,41 @@ def create_app(
             return False
 
     @app.post("/api/fs/upload", tags=["api"])
-    async def fs_upload(file: UploadFile = File(...)):
+    async def fs_upload(
+        file:    UploadFile = File(...),
+        project: str        = Query(default="", description="Project subdirectory for the uploaded file"),
+    ):
         """Upload a file to the server-side upload directory.
 
-        The file is saved under ``upload_dir`` with its original filename
-        (a numeric prefix is added if a name collision occurs).  The response
-        contains the absolute path to the saved file, which can then be passed
-        as a pipeline parameter value.
+        Files are stored under ``<upload_dir>/<project>/`` when *project* is
+        supplied, or ``<upload_dir>/<YYYY-MM-DD>/`` when it is not.  A numeric
+        suffix is appended to the filename if a collision occurs.  The response
+        contains the absolute path, which can be passed directly as a pipeline
+        parameter value.
         """
         if not file.filename:
             raise HTTPException(400, detail="No filename provided")
 
-        # Sanitise: strip path separators so callers can't write to arbitrary locations.
         safe_name = Path(file.filename).name
         if not safe_name or safe_name in (".", ".."):
             raise HTTPException(400, detail="Invalid filename")
 
-        dest = _upload_dir / safe_name
-        # Avoid clobbering an existing file by adding a counter suffix
+        # Resolve project subdirectory
+        if project:
+            # Strip any path separators so callers can't escape the upload root
+            safe_project = re.sub(r'[/\\]', '_', project.strip()).strip("._") or "default"
+        else:
+            safe_project = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+
+        dest_dir = _upload_dir / safe_project
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        dest = dest_dir / safe_name
         if dest.exists():
             stem, suffix = dest.stem, dest.suffix
             counter = 1
             while dest.exists():
-                dest = _upload_dir / f"{stem}_{counter}{suffix}"
+                dest = dest_dir / f"{stem}_{counter}{suffix}"
                 counter += 1
 
         try:
@@ -722,7 +736,7 @@ def create_app(
         finally:
             await file.close()
 
-        return {"path": str(dest), "filename": dest.name, "size": dest.stat().st_size}
+        return {"path": str(dest), "filename": dest.name, "size": dest.stat().st_size, "project": safe_project}
 
 
 
