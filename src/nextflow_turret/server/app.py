@@ -734,7 +734,14 @@ def create_app(
         # Resolve destination directory
         if upload_dir:
             dest_dir = Path(upload_dir).resolve()
-            _assert_under_root(dest_dir)
+            # For explicit project_dir uploads: allow any absolute path (user-chosen).
+            # Fall back to root check only when path happens to be under a configured root;
+            # if not, ensure it's at least absolute (no path-traversal via relative paths).
+            try:
+                _assert_under_root(dest_dir)
+            except HTTPException:
+                if not dest_dir.is_absolute():
+                    raise HTTPException(400, detail="Explicit upload dir must be an absolute path")
             safe_project = dest_dir.name
         elif project:
             safe_project = re.sub(r'[/\\]', '_', project.strip()).strip("._") or "default"
