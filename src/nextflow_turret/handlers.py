@@ -77,7 +77,8 @@ def _default_run_name_to_batch_id(run_name: str) -> str:
     """Extract a batch_id from a run_name using the ``dispatcher_`` prefix convention."""
     prefix = "dispatcher_"
     if run_name.startswith(prefix):
-        return run_name[len(prefix):]
+        batch_id = run_name[len(prefix):]
+        return batch_id if batch_id else str(uuid.uuid4())
     return run_name
 
 

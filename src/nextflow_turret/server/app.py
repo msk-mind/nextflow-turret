@@ -41,6 +41,8 @@ POST    /launches/{id}/cancel        Cancel a launch (HTML form)
 from __future__ import annotations
 
 import collections
+import json
+import re
 import secrets
 import threading
 import time
@@ -188,10 +190,22 @@ def _make_templates(auth_mgr: "AuthManager") -> Jinja2Templates:
     return templates
 
 
+_MAX_BODY_BYTES = 100_000  # 100 KB limit for API JSON bodies
+
+
 async def _body(request: Request) -> dict:
-    """Parse JSON body; return empty dict on missing/invalid body."""
+    """Parse JSON body; return empty dict on missing/invalid body.
+
+    Enforces a 100 KB size limit to prevent memory exhaustion from large payloads.
+    """
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > _MAX_BODY_BYTES:
+        return {}
     try:
-        data = await request.json()
+        raw = await request.body()
+        if len(raw) > _MAX_BODY_BYTES:
+            return {}
+        data = json.loads(raw)
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
@@ -582,12 +596,10 @@ def create_app(
         }
         # Collect individual param__KEY fields from the form
         raw_form   = await request.form()
-        import json as _json
-        import re as _re
         parsed_params: dict = {}
 
         # Param key validation: only word characters and hyphens (safe for CLI args)
-        _VALID_PARAM_KEY = _re.compile(r'^[\w][\w\-]*$')
+        _VALID_PARAM_KEY = re.compile(r'^[\w][\w\-]*$')
         _MAX_PARAMS_JSON_BYTES = 100_000
 
         def _validate_param_key(key: str) -> bool:
@@ -619,7 +631,7 @@ def create_app(
                     status_code=422,
                 )
             try:
-                parsed_params = _json.loads(params)
+                parsed_params = json.loads(params)
                 if not isinstance(parsed_params, dict):
                     raise ValueError("params must be a JSON object")
                 invalid_keys = [k for k in parsed_params if not _validate_param_key(str(k))]

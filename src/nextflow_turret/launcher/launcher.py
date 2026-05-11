@@ -279,6 +279,7 @@ class Launcher:
             try:
                 # Truncate the error message to avoid leaking sensitive system info
                 err_msg = str(exc)[:200]
-                Path(record.log_path).open("a").write(f"\n# ERROR: {err_msg}\n")
+                with Path(record.log_path).open("a") as _f:
+                    _f.write(f"\n# ERROR: {err_msg}\n")
             except Exception:
                 pass
