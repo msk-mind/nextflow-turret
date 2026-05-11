@@ -17,13 +17,17 @@
 
     <div class="form-row">
       <label for="pipeline">Pipeline <span style="color:var(--danger)">*</span></label>
-      <input type="text" id="pipeline" name="pipeline" required
-             placeholder="nf-core/rnaseq  or  https://github.com/org/repo"
-             value="{{ form.pipeline or '' }}">
+      <div class="param-input-row">
+        <input type="text" id="pipeline" name="pipeline" required
+               placeholder="nf-core/rnaseq  or  https://github.com/org/repo  or  /local/path"
+               value="{{ form.pipeline or '' }}">
+        <button type="button" class="btn btn-secondary btn-sm fs-browse-btn"
+                data-target="pipeline" data-mode="dir" title="Browse for local pipeline directory">&#128193;</button>
+      </div>
       <small class="muted">GitHub short-form (<code>org/repo</code>), full GitHub URL, or a local path.</small>
     </div>
 
-    <div class="form-row" style="display:flex;gap:0.75rem;align-items:flex-end;">
+    <div class="form-row" id="revision-row" style="display:flex;gap:0.75rem;align-items:flex-end;">
       <div style="flex:1;">
         <label for="revision">Revision / Branch / Tag</label>
         <input type="text" id="revision" name="revision"
@@ -46,7 +50,7 @@
       <small class="muted">Click to select; multiple profiles are comma-separated.</small>
     </div>
 
-    <div class="form-row">
+    <div class="form-row" id="project-dir-row">
       <label for="project_dir">Project Directory</label>
       <div class="param-input-row">
         <input type="text" id="project_dir" name="project_dir"
@@ -55,7 +59,7 @@
         <button type="button" class="btn btn-secondary btn-sm fs-browse-btn"
                 data-target="project_dir" data-mode="dir" title="Browse filesystem">&#128193;</button>
       </div>
-      <small class="muted">Uploaded files and <code>nextflow.config</code> are placed here.</small>
+      <small class="muted" id="project-dir-hint">Uploaded files and <code>nextflow.config</code> are placed here.</small>
     </div>
 
     <div class="form-row">
@@ -214,10 +218,43 @@
   const profileChips = document.getElementById('profile-chips');
   const profileInput = document.getElementById('profile');
   const revisionList = document.getElementById('revision-list');
+  const revisionRow  = document.getElementById('revision-row');
   const pipelineEl   = document.getElementById('pipeline');
   const projectDirEl = document.getElementById('project_dir');
+  const projectDirRow  = document.getElementById('project-dir-row');
+  const projectDirHint = document.getElementById('project-dir-hint');
   const configEditLink   = document.getElementById('config-edit-link');
   const configEditAnchor = document.getElementById('config-edit-anchor');
+
+  /* Returns true when pipeline value looks like a local filesystem path */
+  function _pipelineIsLocal(val) { return val.startsWith('/') || val.startsWith('.'); }
+
+  /* Called whenever the pipeline input changes — syncs dependent fields */
+  function _onPipelineChange() {
+    const val = pipelineEl.value.trim();
+    const local = _pipelineIsLocal(val);
+    // Revision / branch / tag is not relevant for local directories
+    revisionRow.style.display = local ? 'none' : '';
+    if (local) {
+      // Project dir is the pipeline dir itself — lock the field
+      projectDirEl.value    = val;
+      projectDirEl.readOnly = true;
+      projectDirEl.style.opacity = '0.6';
+      projectDirHint.innerHTML =
+        '<strong>Using pipeline directory as project directory.</strong> ' +
+        'Files and config will be placed inside the local pipeline path.';
+    } else {
+      projectDirEl.readOnly = false;
+      projectDirEl.style.opacity = '';
+      projectDirHint.innerHTML =
+        'Uploaded files and <code>nextflow.config</code> are placed here.';
+    }
+  }
+
+  pipelineEl.addEventListener('input', _onPipelineChange);
+  pipelineEl.addEventListener('change', _onPipelineChange);
+  // Run once on page load in case form is pre-filled
+  _onPipelineChange();
 
   function _selectedProfiles() {
     return profileInput.value.split(',').map(s => s.trim()).filter(Boolean);
@@ -273,7 +310,7 @@
 
   pipelineEl.addEventListener('blur', async () => {
     const pipeline = pipelineEl.value.trim();
-    if (!pipeline) return;
+    if (!pipeline || _pipelineIsLocal(pipeline)) return;
     try {
       const resp = await fetch('/api/pipeline/refs?pipeline=' + encodeURIComponent(pipeline));
       if (resp.ok) populateRefs(await resp.json());
@@ -326,10 +363,10 @@
         : '';
       statusEl.textContent = 'Loaded ' + data.params.length + ' parameters from ' + data.source + '.' + profileSuffix;
 
-      // Show "Edit nextflow.config" link
+      // Show "Edit nextflow.config" link — use local pipeline path directly as projDir when local
       const pipeline = pipelineEl.value.trim();
       const revision = document.getElementById('revision').value.trim();
-      const projDir  = projectDirEl.value.trim();
+      const projDir  = _pipelineIsLocal(pipeline) ? pipeline : projectDirEl.value.trim();
       if (projDir) {
         let href = '/config/edit?path=' + encodeURIComponent(projDir)
                  + '&pipeline=' + encodeURIComponent(pipeline);

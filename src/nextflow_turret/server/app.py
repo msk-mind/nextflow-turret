@@ -953,10 +953,16 @@ def create_app(
                 return _error_launch_form_response(request, f"Invalid params JSON: {exc}", form_data)
 
         # Sanitise empty strings to None
-        revision = revision or None
-        profile  = profile  or None
-        work_dir = work_dir or None
-        run_name = run_name or None
+        revision    = revision    or None
+        profile     = profile     or None
+        work_dir    = work_dir    or None
+        run_name    = run_name    or None
+        project_dir = project_dir or None
+
+        # When pipeline is a local path the project directory IS the pipeline directory.
+        _pipeline_is_local = pipeline.startswith("/") or pipeline.startswith(".")
+        if _pipeline_is_local and not project_dir:
+            project_dir = str(Path(pipeline).resolve())
 
         launch_id = launcher.submit(
             pipeline  = pipeline,
