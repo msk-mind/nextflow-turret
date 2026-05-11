@@ -311,6 +311,45 @@ def fetch_pipeline_schema(
     return _parse_schema(schema)
 
 
+def fetch_pipeline_refs(
+    pipeline: str,
+    timeout:  int = 8,
+) -> dict[str, list[str]]:
+    """Return ``{"branches": [...], "tags": [...]}`` for a remote pipeline.
+
+    Uses the GitHub REST API for GitHub-hosted pipelines.  Returns empty lists
+    for local paths or pipelines on unsupported hosts.
+    """
+    empty: dict[str, list[str]] = {"branches": [], "tags": []}
+
+    if pipeline.startswith("/") or pipeline.startswith("."):
+        return empty
+
+    # Parse owner/repo from URL or short form
+    m = re.match(
+        r"https?://github\.com/([^/]+)/([^/\s]+?)(?:\.git)?/?$",
+        pipeline.strip(),
+    )
+    if m:
+        owner, repo = m.group(1), m.group(2)
+    else:
+        short = re.match(r"^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:@[^\s]+)?$", pipeline.strip())
+        if not short:
+            return empty
+        owner, repo = short.group(1), short.group(2)
+
+    def _gh_list(endpoint: str) -> list[str]:
+        url = f"https://api.github.com/repos/{owner}/{repo}/{endpoint}?per_page=100"
+        data = _fetch_url(url, timeout=timeout)
+        if not isinstance(data, list):
+            return []
+        return [item.get("name", "") for item in data if item.get("name")]
+
+    branches = _gh_list("branches")
+    tags     = _gh_list("tags")
+    return {"branches": branches, "tags": tags}
+
+
 def fetch_pipeline_profiles(
     pipeline: str,
     revision: Optional[str] = None,

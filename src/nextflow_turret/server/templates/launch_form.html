@@ -28,7 +28,9 @@
         <label for="revision">Revision / Branch / Tag</label>
         <input type="text" id="revision" name="revision"
                placeholder="main"
+               list="revision-list"
                value="{{ form.revision or '' }}">
+        <datalist id="revision-list"></datalist>
       </div>
       <button type="button" id="load-schema-btn" class="btn btn-secondary" style="margin-bottom:0">
         &#128269; Load Parameters
@@ -162,15 +164,17 @@
 
   /* == Schema-driven parameter form == */
 
-  const loadBtn     = document.getElementById('load-schema-btn');
-  const statusEl    = document.getElementById('schema-status');
-  const schemaBlock = document.getElementById('schema-params');
-  const reqEl       = document.getElementById('required-params');
-  const optEl       = document.getElementById('optional-params');
-  const optSection  = document.getElementById('optional-section');
-  const jsonSection = document.getElementById('json-params-section');
-  const profileList = document.getElementById('profile-list');
-  const profileHint = document.getElementById('profile-hint');
+  const loadBtn      = document.getElementById('load-schema-btn');
+  const statusEl     = document.getElementById('schema-status');
+  const schemaBlock  = document.getElementById('schema-params');
+  const reqEl        = document.getElementById('required-params');
+  const optEl        = document.getElementById('optional-params');
+  const optSection   = document.getElementById('optional-section');
+  const jsonSection  = document.getElementById('json-params-section');
+  const profileList  = document.getElementById('profile-list');
+  const profileHint  = document.getElementById('profile-hint');
+  const revisionList = document.getElementById('revision-list');
+  const pipelineEl   = document.getElementById('pipeline');
 
   function populateProfiles(profiles) {
     profileList.innerHTML = '';
@@ -183,6 +187,29 @@
     profileHint.textContent = 'Available: ' + profiles.join(', ');
     profileHint.style.display = '';
   }
+
+  function populateRefs(refs) {
+    revisionList.innerHTML = '';
+    (refs.branches || []).forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b; opt.label = 'branch';
+      revisionList.appendChild(opt);
+    });
+    (refs.tags || []).forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t; opt.label = 'tag';
+      revisionList.appendChild(opt);
+    });
+  }
+
+  pipelineEl.addEventListener('blur', async () => {
+    const pipeline = pipelineEl.value.trim();
+    if (!pipeline) return;
+    try {
+      const resp = await fetch('/api/pipeline/refs?pipeline=' + encodeURIComponent(pipeline));
+      if (resp.ok) populateRefs(await resp.json());
+    } catch (_) { /* ignore network errors */ }
+  });
 
   loadBtn.addEventListener('click', async () => {
     const pipeline = document.getElementById('pipeline').value.trim();

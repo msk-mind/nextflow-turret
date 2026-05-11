@@ -65,7 +65,7 @@ from ..auth import AuthConfig, AuthManager, AuthMiddleware, AuthMode, safe_next_
 from ..handlers import TowerRouter
 from ..db.store import RunStore
 from ..launcher.launcher import Launcher
-from ..schema import fetch_pipeline_schema, fetch_pipeline_profiles
+from ..schema import fetch_pipeline_schema, fetch_pipeline_profiles, fetch_pipeline_refs
 from ..state import _task_counts_from_progress
 from .registry import PersistentWorkflowRegistry
 
@@ -615,6 +615,13 @@ def create_app(
             "profiles": profiles,
             "source":   "nextflow_schema.json" if params else None,
         }
+
+    @app.get("/api/pipeline/refs", tags=["api"])
+    async def get_pipeline_refs(
+        pipeline: str = Query(..., description="Pipeline identifier (e.g. nf-core/rnaseq)"),
+    ):
+        """Return branches and tags for a GitHub-hosted pipeline."""
+        return fetch_pipeline_refs(pipeline)
 
     # ------------------------------------------------------------------ #
     # Filesystem endpoints                                                 #
