@@ -788,35 +788,37 @@ def create_app(
     @app.post("/api/pipeline/clone", tags=["api"])
     async def pipeline_clone(
         pipeline: str           = Query(..., description="Pipeline identifier (org/repo, full URL)"),
-        path:     str           = Query(..., description="Destination parent directory; pipeline is cloned into a sub-directory"),
+        path:     str           = Query(..., description="Destination directory; pipeline is cloned directly into this path"),
         revision: Optional[str] = Query(default=None, description="Branch or tag to clone"),
     ):
-        """Clone a remote pipeline into a sub-directory of *path*.
+        """Clone a remote pipeline directly into *path*.
 
-        Resolves ``pipeline`` to a ``git clone``-able HTTPS URL, then runs::
+        Resolves ``pipeline`` to a ``git clone``-able URL, then runs::
 
-            git clone [--branch <revision>] <url> <path>/<repo-name>
+            git clone [--branch <revision>] --depth 1 <url> <path>
 
+        *path* must not exist or must be an empty directory.
         Returns ``{"dest": "...", "repo": "..."}`` on success.
-        Raises 400 for local paths, 409 if the destination already exists.
+        Raises 400 for local paths, 409 if the destination is non-empty.
         """
         clone_url = resolve_pipeline_clone_url(pipeline)
         if clone_url is None:
             raise HTTPException(400, detail="Pipeline must be a remote URL or 'org/repo' short-form (not a local path)")
 
-        parent = Path(path).resolve()
-        _assert_under_root(parent)
+        dest = Path(path).resolve()
+        _assert_under_root(dest)
 
-        # Derive repo name from URL (strip .git suffix)
+        if dest.exists():
+            # Allow cloning into an existing empty directory
+            if any(dest.iterdir()):
+                raise HTTPException(409, detail=f"Destination already exists and is not empty: {dest}")
+        else:
+            dest.mkdir(parents=True, exist_ok=True)
+
+        # Derive repo name from URL (strip .git suffix) for the response only
         repo_name = clone_url.rstrip("/").rsplit("/", 1)[-1]
         if repo_name.endswith(".git"):
             repo_name = repo_name[:-4]
-
-        dest = parent / repo_name
-        if dest.exists():
-            raise HTTPException(409, detail=f"Destination already exists: {dest}")
-
-        parent.mkdir(parents=True, exist_ok=True)
 
         cmd = ["git", "clone", "--depth", "1"]
         if revision:
