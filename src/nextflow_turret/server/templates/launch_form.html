@@ -240,6 +240,13 @@
   /* Returns true when pipeline value looks like a local filesystem path */
   function _pipelineIsLocal(val) { return val.startsWith('/') || val.startsWith('.'); }
 
+  /* Auto-load params when pipeline is local and hasn't been loaded yet */
+  let _lastLoadedPipeline = '';
+  function _maybeAutoLoad() {
+    const val = pipelineEl.value.trim();
+    if (_pipelineIsLocal(val) && val !== _lastLoadedPipeline) loadBtn.click();
+  }
+
   /* Show/hide clone button based on current field values */
   function _updateCloneRow() {
     const pipe = pipelineEl.value.trim();
@@ -388,7 +395,11 @@
 
   pipelineEl.addEventListener('blur', async () => {
     const pipeline = pipelineEl.value.trim();
-    if (!pipeline || _pipelineIsLocal(pipeline)) return;
+    if (!pipeline) return;
+    if (_pipelineIsLocal(pipeline)) {
+      _maybeAutoLoad();
+      return;
+    }
     try {
       const resp = await fetch('/api/pipeline/refs?pipeline=' + encodeURIComponent(pipeline));
       if (resp.ok) populateRefs(await resp.json());
@@ -440,6 +451,7 @@
         ? ' ' + data.profiles.length + ' profiles found.'
         : '';
       statusEl.textContent = 'Loaded ' + data.params.length + ' parameters from ' + data.source + '.' + profileSuffix;
+      _lastLoadedPipeline = pipelineEl.value.trim();
       _updateConfigEditLink();
 
     } catch (_err) {
@@ -776,7 +788,13 @@
     if (e.key === 'Escape' && modal.style.display !== 'none') closeModal();
   });
   modalSelect.addEventListener('click', () => {
-    if (_selectedPath && _targetInput) _targetInput.value = _selectedPath;
+    if (_selectedPath && _targetInput) {
+      _targetInput.value = _selectedPath;
+      if (_targetInput.id === 'pipeline') {
+        _onPipelineChange();
+        _maybeAutoLoad();
+      }
+    }
     closeModal();
   });
 
