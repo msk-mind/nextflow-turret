@@ -28,6 +28,12 @@ from typing import Any, Optional
 # Data model
 # ---------------------------------------------------------------------------
 
+# Nextflow schema format values that indicate a file or directory path.
+_FILE_PATH_FORMATS:      frozenset[str] = frozenset({"file-path", "file-path-pattern"})
+_DIRECTORY_PATH_FORMATS: frozenset[str] = frozenset({"directory-path"})
+_PATH_FORMATS:           frozenset[str] = _FILE_PATH_FORMATS | _DIRECTORY_PATH_FORMATS | {"path"}
+
+
 @dataclass
 class ParamSpec:
     """A single pipeline parameter extracted from nextflow_schema.json."""
@@ -41,6 +47,19 @@ class ParamSpec:
     choices:     list[str]              = field(default_factory=list)
     group:       str                    = ""
     group_title: str                    = ""
+    format:      str                    = ""  # e.g. "file-path", "directory-path"
+
+    @property
+    def is_file_path(self) -> bool:
+        return self.format in _FILE_PATH_FORMATS
+
+    @property
+    def is_directory_path(self) -> bool:
+        return self.format in _DIRECTORY_PATH_FORMATS
+
+    @property
+    def is_path(self) -> bool:
+        return self.format in _PATH_FORMATS
 
     def to_dict(self) -> dict:
         return {
@@ -54,6 +73,7 @@ class ParamSpec:
             "choices":     self.choices,
             "group":       self.group,
             "group_title": self.group_title,
+            "format":      self.format,
         }
 
 
@@ -161,6 +181,7 @@ def _parse_schema(schema: dict) -> list[ParamSpec]:
                 choices     = [str(c) for c in choices],
                 group       = group_key,
                 group_title = group_title,
+                format      = pval.get("format", ""),
             ))
 
     # Also handle top-level properties (pipelines without definitions)
@@ -176,6 +197,7 @@ def _parse_schema(schema: dict) -> list[ParamSpec]:
             required    = pkey in set(schema.get("required", [])),
             hidden      = pval.get("hidden", False),
             choices     = [str(c) for c in pval.get("enum", [])],
+            format      = pval.get("format", ""),
         ))
 
     return params

@@ -42,15 +42,19 @@ from __future__ import annotations
 
 import collections
 import json
+import os
 import re
 import secrets
+import shutil
+import stat
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Form, HTTPException, Query, Request
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -363,6 +367,8 @@ def create_app(
     default_work_dir: Optional[str] = None,
     default_profile:  Optional[str] = None,
     auth_config:      Optional[AuthConfig] = None,
+    browse_roots:     list[str | Path]     = (),
+    upload_dir:       Optional[str | Path] = None,
 ) -> FastAPI:
     """Create and return the Nextflow Turret FastAPI application.
 
@@ -386,9 +392,39 @@ def create_app(
     auth_config:
         Authentication configuration.  Pass ``None`` or ``AuthConfig()``
         (mode=none) to disable auth entirely.
+    browse_roots:
+        Filesystem directories users are allowed to browse via the
+        ``/api/fs/browse`` endpoint.  Defaults to ``default_work_dir`` (if
+        set) plus the current user's home directory.
+    upload_dir:
+        Directory where files uploaded via ``POST /api/fs/upload`` are
+        stored.  Defaults to a ``turret-uploads`` sub-directory of
+        ``default_work_dir`` if set, otherwise the system temp directory.
     """
     if auth_config is None:
         auth_config = AuthConfig()
+
+    # ---- resolve filesystem roots ------------------------------------------
+    _resolved_roots: list[Path] = []
+    for r in browse_roots:
+        _resolved_roots.append(Path(r).resolve())
+    if not _resolved_roots:
+        if default_work_dir:
+            _resolved_roots.append(Path(default_work_dir).resolve())
+        _resolved_roots.append(Path.home())
+
+    _upload_dir: Path
+    if upload_dir:
+        _upload_dir = Path(upload_dir).resolve()
+    elif default_work_dir:
+        _upload_dir = Path(default_work_dir).resolve() / "turret-uploads"
+    else:
+        _upload_dir = Path(tempfile.gettempdir()) / "turret-uploads"
+    _upload_dir.mkdir(parents=True, exist_ok=True)
+    # upload dir is implicitly also browseable
+    if _upload_dir not in _resolved_roots:
+        _resolved_roots.append(_upload_dir)
+    # -------------------------------------------------------------------------
 
     store     = RunStore(db_path)
     registry  = PersistentWorkflowRegistry(store)
@@ -563,8 +599,121 @@ def create_app(
         }
 
     # ------------------------------------------------------------------ #
-    # Web UI                                                               #
+    # Filesystem endpoints                                                 #
     # ------------------------------------------------------------------ #
+
+    def _assert_under_root(path: Path) -> None:
+        """Raise 403 if *path* is not within any allowed browse root."""
+        resolved = path.resolve()
+        for root in _resolved_roots:
+            try:
+                resolved.relative_to(root)
+                return
+            except ValueError:
+                continue
+        raise HTTPException(
+            403,
+            detail=(
+                f"Access denied: {path} is not under an allowed browse root. "
+                f"Allowed roots: {[str(r) for r in _resolved_roots]}"
+            ),
+        )
+
+    @app.get("/api/fs/browse", tags=["api"])
+    async def fs_browse(path: str = Query("/", description="Absolute directory path to list")):
+        """List the contents of a server-side directory.
+
+        Only paths within the configured ``browse_roots`` are accessible.
+        Returns a JSON object with the current path, its parent, and a list
+        of entries (files and sub-directories).
+        """
+        target = Path(path).resolve()
+        _assert_under_root(target)
+
+        if not target.exists():
+            raise HTTPException(404, detail=f"Path not found: {path}")
+        if not target.is_dir():
+            raise HTTPException(400, detail=f"Not a directory: {path}")
+
+        entries = []
+        try:
+            for child in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+                try:
+                    st = child.stat()
+                    entries.append({
+                        "name":    child.name,
+                        "is_dir":  child.is_dir(),
+                        "size":    st.st_size if not child.is_dir() else None,
+                        "mtime":   datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                        "path":    str(child),
+                    })
+                except PermissionError:
+                    entries.append({"name": child.name, "is_dir": child.is_dir(), "error": "permission denied", "path": str(child)})
+        except PermissionError as exc:
+            raise HTTPException(403, detail=str(exc)) from exc
+
+        parent = str(target.parent) if str(target) != str(target.parent) else None
+        # Clamp parent to browse roots so users can't navigate above all roots
+        if parent:
+            parent_path = Path(parent)
+            under_root = any(
+                _is_relative_to(parent_path.resolve(), r) for r in _resolved_roots
+            )
+            if not under_root:
+                parent = None
+
+        return {
+            "path":    str(target),
+            "parent":  parent,
+            "roots":   [str(r) for r in _resolved_roots],
+            "entries": entries,
+        }
+
+    def _is_relative_to(child: Path, parent: Path) -> bool:
+        """Return True if *child* is relative to *parent* (Python 3.9 compat)."""
+        try:
+            child.relative_to(parent)
+            return True
+        except ValueError:
+            return False
+
+    @app.post("/api/fs/upload", tags=["api"])
+    async def fs_upload(file: UploadFile = File(...)):
+        """Upload a file to the server-side upload directory.
+
+        The file is saved under ``upload_dir`` with its original filename
+        (a numeric prefix is added if a name collision occurs).  The response
+        contains the absolute path to the saved file, which can then be passed
+        as a pipeline parameter value.
+        """
+        if not file.filename:
+            raise HTTPException(400, detail="No filename provided")
+
+        # Sanitise: strip path separators so callers can't write to arbitrary locations.
+        safe_name = Path(file.filename).name
+        if not safe_name or safe_name in (".", ".."):
+            raise HTTPException(400, detail="Invalid filename")
+
+        dest = _upload_dir / safe_name
+        # Avoid clobbering an existing file by adding a counter suffix
+        if dest.exists():
+            stem, suffix = dest.stem, dest.suffix
+            counter = 1
+            while dest.exists():
+                dest = _upload_dir / f"{stem}_{counter}{suffix}"
+                counter += 1
+
+        try:
+            with dest.open("wb") as fh:
+                shutil.copyfileobj(file.file, fh)
+        except OSError as exc:
+            raise HTTPException(500, detail=f"Failed to save file: {exc}") from exc
+        finally:
+            await file.close()
+
+        return {"path": str(dest), "filename": dest.name, "size": dest.stat().st_size}
+
+
 
     def _pipelines_context(request: Request) -> dict:
         rows         = _build_pipeline_rows(launcher, registry)

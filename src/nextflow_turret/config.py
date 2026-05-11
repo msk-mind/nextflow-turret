@@ -12,10 +12,12 @@ precedence over config-file values.
 Example ``turret.toml``::
 
     [server]
-    host    = "0.0.0.0"
-    port    = 8000
-    db      = "/data/turret.db"
-    log_dir = "/data/turret-logs"
+    host         = "0.0.0.0"
+    port         = 8000
+    db           = "/data/turret.db"
+    log_dir      = "/data/turret-logs"
+    upload_dir   = "/data/turret-uploads"   # where uploaded parameter files are stored
+    browse_roots = ["/data", "/scratch"]    # directories users may browse in the UI
 
     [launcher]
     nextflow        = "/opt/nextflow/nextflow"
@@ -72,10 +74,12 @@ class TurretConfig:
     """Merged configuration (config file + CLI overrides)."""
 
     # [server]
-    host:    str = "0.0.0.0"
-    port:    int = 8000
-    db:      str = "turret.db"
-    log_dir: str = "turret-logs"
+    host:         str       = "0.0.0.0"
+    port:         int       = 8000
+    db:           str       = "turret.db"
+    log_dir:      str       = "turret-logs"
+    upload_dir:   Optional[str]  = None        # where uploaded parameter files are saved
+    browse_roots: list[str]      = field(default_factory=list)  # allowed filesystem browse roots
 
     # [launcher]
     nextflow:        str           = "nextflow"
@@ -128,10 +132,12 @@ def load_config(config_path: Optional[str] = None) -> tuple[TurretConfig, Option
     launcher = data.get("launcher", {})
 
     # server section
-    if "host"    in server: cfg.host    = str(server["host"])
-    if "port"    in server: cfg.port    = int(server["port"])
-    if "db"      in server: cfg.db      = str(server["db"])
-    if "log_dir" in server: cfg.log_dir = str(server["log_dir"])
+    if "host"         in server: cfg.host         = str(server["host"])
+    if "port"         in server: cfg.port         = int(server["port"])
+    if "db"           in server: cfg.db           = str(server["db"])
+    if "log_dir"      in server: cfg.log_dir      = str(server["log_dir"])
+    if "upload_dir"   in server: cfg.upload_dir   = str(server["upload_dir"])
+    if "browse_roots" in server: cfg.browse_roots = [str(r) for r in server["browse_roots"]]
 
     # launcher section
     if "nextflow"        in launcher: cfg.nextflow        = str(launcher["nextflow"])

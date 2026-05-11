@@ -87,6 +87,8 @@ def main() -> None:
         default_work_dir = args.work_dir,
         default_profile  = args.profile,
         auth_config      = cfg.auth,
+        browse_roots     = cfg.browse_roots,
+        upload_dir       = cfg.upload_dir,
     )
     uvicorn.run(app, host=args.host, port=args.port)
 
