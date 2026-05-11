@@ -504,7 +504,8 @@
     if (data.parent) modalList.appendChild(makeEntry({ name: '..', path: data.parent, is_dir: true }));
 
     (data.entries || []).forEach(entry => {
-      if (!entry.error) modalList.appendChild(makeEntry(entry));
+      if (!entry.error && (_browseMode !== 'dir' || entry.is_dir))
+        modalList.appendChild(makeEntry(entry));
     });
 
     if (modalList.children.length === 0) {
