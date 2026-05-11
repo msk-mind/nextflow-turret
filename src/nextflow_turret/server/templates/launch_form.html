@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title_suffix %} — New Launch{% endblock %}
+{% block title_suffix %} &mdash; New Launch{% endblock %}
 
 {% block content %}
 <div class="page-header">
@@ -14,7 +14,7 @@
   <form method="POST" action="/launch" id="launch-form">
 
     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-    <!-- ── Pipeline identity ────────────────────────────── -->
+
     <div class="form-row">
       <label for="pipeline">Pipeline <span style="color:var(--danger)">*</span></label>
       <input type="text" id="pipeline" name="pipeline" required
@@ -31,11 +31,10 @@
                value="{{ form.revision or '' }}">
       </div>
       <button type="button" id="load-schema-btn" class="btn btn-secondary" style="margin-bottom:0">
-        🔍 Load Parameters
+        &#128269; Load Parameters
       </button>
     </div>
 
-    <!-- ── Run options ──────────────────────────────────── -->
     <div class="form-row">
       <label for="profile">Profile</label>
       <input type="text" id="profile" name="profile"
@@ -45,9 +44,13 @@
 
     <div class="form-row">
       <label for="work_dir">Work Directory</label>
-      <input type="text" id="work_dir" name="work_dir"
-             placeholder="/scratch/work  (leave blank for Nextflow default)"
-             value="{{ form.work_dir or '' }}">
+      <div class="param-input-row">
+        <input type="text" id="work_dir" name="work_dir"
+               placeholder="/scratch/work  (leave blank for Nextflow default)"
+               value="{{ form.work_dir or '' }}">
+        <button type="button" class="btn btn-secondary btn-sm fs-browse-btn"
+                data-target="work_dir" data-mode="dir" title="Browse filesystem">&#128193;</button>
+      </div>
     </div>
 
     <div class="form-row">
@@ -57,7 +60,6 @@
              value="{{ form.run_name or '' }}">
     </div>
 
-    <!-- ── Dynamic parameter fields ─────────────────────── -->
     <div id="schema-status" style="display:none;" class="muted" aria-live="polite"></div>
 
     <div id="schema-params" style="display:none;">
@@ -67,16 +69,15 @@
 
       <details id="optional-section" style="display:none;">
         <summary style="cursor:pointer;user-select:none;margin:0.75rem 0 0.5rem;">
-          ▸ Optional parameters
+          &#9658; Optional parameters
         </summary>
         <div id="optional-params"></div>
       </details>
     </div>
 
-    <!-- ── JSON fallback ────────────────────────────────── -->
     <div id="json-params-section">
       <div class="form-row" id="json-fallback-row">
-        <label for="params">Parameters <span class="muted">(JSON — or use "Load Parameters" above)</span></label>
+        <label for="params">Parameters <span class="muted">(JSON &mdash; or use &ldquo;Load Parameters&rdquo; above)</span></label>
         <textarea id="params" name="params"
                   placeholder='{"input": "s3://bucket/samplesheet.csv", "outdir": "results"}'
                   style="font-family:monospace;font-size:0.875rem;"
@@ -84,20 +85,74 @@
       </div>
     </div>
 
-    <button type="submit" class="btn btn-primary" style="margin-top:0.5rem;">🚀 Launch Pipeline</button>
+    <button type="submit" class="btn btn-primary" style="margin-top:0.5rem;">&#128640; Launch Pipeline</button>
   </form>
+</div>
+
+<!-- Filesystem browser modal -->
+<div id="fs-modal" role="dialog" aria-modal="true" aria-label="Browse filesystem"
+     style="display:none;position:fixed;inset:0;z-index:1000;">
+  <div id="fs-modal-backdrop"
+       style="position:absolute;inset:0;background:rgba(0,0,0,0.6);"></div>
+  <div id="fs-modal-box" style="
+      position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      background:var(--surface);border:1px solid var(--border);border-radius:8px;
+      box-shadow:0 8px 32px rgba(0,0,0,0.5);
+      width:min(660px,96vw);max-height:80vh;
+      display:flex;flex-direction:column;overflow:hidden;">
+    <div style="display:flex;justify-content:space-between;align-items:center;
+                padding:0.75rem 1rem;border-bottom:1px solid var(--border);font-weight:600;">
+      <span style="font-size:1rem;">&#128193; Browse filesystem</span>
+      <button type="button" id="fs-modal-close"
+              style="background:none;border:none;font-size:1.5rem;cursor:pointer;
+                     color:var(--muted);line-height:1;padding:0 0.2rem;"
+              aria-label="Close">&times;</button>
+    </div>
+    <div id="fs-modal-crumbs"
+         style="padding:0.4rem 1rem;font-size:0.8rem;color:var(--text-dim);
+                border-bottom:1px solid var(--border);background:var(--bg);
+                overflow-x:auto;white-space:nowrap;min-height:2rem;"></div>
+    <div id="fs-modal-list" style="flex:1;overflow-y:auto;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;
+                padding:0.65rem 1rem;border-top:1px solid var(--border);background:var(--bg);">
+      <span id="fs-modal-selected"
+            style="font-size:0.8rem;color:var(--muted);overflow:hidden;
+                   text-overflow:ellipsis;max-width:60%;white-space:nowrap;"></span>
+      <div style="display:flex;gap:0.5rem;">
+        <button type="button" id="fs-modal-cancel" class="btn btn-secondary btn-sm">Cancel</button>
+        <button type="button" id="fs-modal-select" class="btn btn-primary btn-sm" disabled>Select</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <style>
   .param-group { margin-bottom: 1.25rem; }
-  .param-group label { display:block; margin-bottom:0.2rem; font-weight:500; }
-  .param-group .param-desc { font-size:0.8125rem; color:var(--muted,#777); margin-top:0.15rem; }
-  .param-required-star { color:var(--danger,#c0392b); margin-left:0.15rem; }
+  .param-group > label { display:block; margin-bottom:0.2rem; font-weight:500; }
+  .param-group .param-desc { font-size:0.8125rem; color:var(--muted); margin-top:0.2rem; }
+  .param-required-star { color:var(--danger); margin-left:0.15rem; }
+  .param-input-row { display:flex; gap:0.4rem; align-items:center; }
+  .param-input-row input, .param-input-row select { flex:1; min-width:0; }
+  .btn-sm { padding:0.3rem 0.65rem; font-size:0.8125rem; }
+  .fs-entry {
+    display:flex; align-items:center; gap:0.5rem;
+    padding:0.45rem 1rem; cursor:pointer; user-select:none;
+    border-bottom:1px solid var(--border); font-size:0.875rem; color:var(--text);
+  }
+  .fs-entry:hover { background:rgba(255,255,255,0.04); }
+  .fs-entry.fs-selected { background:rgba(79,142,247,0.18); }
+  .fs-entry .fs-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .fs-entry .fs-meta { font-size:0.75rem; color:var(--muted); white-space:nowrap; flex-shrink:0; }
+  .fs-crumb-link { color:var(--accent); cursor:pointer; }
+  .fs-crumb-link:hover { text-decoration:underline; }
 </style>
 
 <script>
 (function () {
-  const btn         = document.getElementById('load-schema-btn');
+
+  /* == Schema-driven parameter form == */
+
+  const loadBtn     = document.getElementById('load-schema-btn');
   const statusEl    = document.getElementById('schema-status');
   const schemaBlock = document.getElementById('schema-params');
   const reqEl       = document.getElementById('required-params');
@@ -105,65 +160,81 @@
   const optSection  = document.getElementById('optional-section');
   const jsonSection = document.getElementById('json-params-section');
 
-  btn.addEventListener('click', async () => {
+  loadBtn.addEventListener('click', async () => {
     const pipeline = document.getElementById('pipeline').value.trim();
     if (!pipeline) { alert('Please enter a pipeline first.'); return; }
 
     const revision = document.getElementById('revision').value.trim();
-    const url      = '/api/pipeline/schema?pipeline=' + encodeURIComponent(pipeline)
-                   + (revision ? '&revision=' + encodeURIComponent(revision) : '');
+    const url = '/api/pipeline/schema?pipeline=' + encodeURIComponent(pipeline)
+              + (revision ? '&revision=' + encodeURIComponent(revision) : '');
 
-    btn.disabled  = true;
-    btn.textContent = '⏳ Loading…';
+    loadBtn.disabled    = true;
+    loadBtn.textContent = 'Loading...';
     statusEl.style.display = 'block';
-    statusEl.textContent = 'Fetching nextflow_schema.json…';
+    statusEl.textContent   = 'Fetching nextflow_schema.json...';
 
     try {
       const resp = await fetch(url);
       const data = await resp.json();
 
       if (!resp.ok || !data.params || data.params.length === 0) {
-        statusEl.textContent = data.params && data.params.length === 0
-          ? 'No schema found — enter parameters as JSON below.'
-          : 'Could not fetch schema — enter parameters as JSON below.';
+        statusEl.textContent = (data.params && data.params.length === 0)
+          ? 'No schema found - enter parameters as JSON below.'
+          : 'Could not fetch schema - enter parameters as JSON below.';
         jsonSection.style.display = '';
         return;
       }
 
-      // Hide JSON textarea, show individual fields
-      jsonSection.style.display  = 'none';
-      schemaBlock.style.display  = '';
-      reqEl.innerHTML  = '';
-      optEl.innerHTML  = '';
+      jsonSection.style.display = 'none';
+      schemaBlock.style.display = '';
+      reqEl.innerHTML = '';
+      optEl.innerHTML = '';
 
       const required = data.params.filter(p => p.required && !p.hidden);
       const optional = data.params.filter(p => !p.required && !p.hidden);
-
       required.forEach(p => reqEl.appendChild(buildField(p, true)));
       optional.forEach(p => optEl.appendChild(buildField(p, false)));
-
       if (optional.length > 0) optSection.style.display = '';
-      statusEl.textContent = `Loaded ${data.params.length} parameters from ${data.source}.`;
+      statusEl.textContent = 'Loaded ' + data.params.length + ' parameters from ' + data.source + '.';
 
-    } catch (err) {
-      statusEl.textContent = 'Error fetching schema — enter parameters as JSON below.';
+    } catch (_err) {
+      statusEl.textContent  = 'Error fetching schema - enter parameters as JSON below.';
       jsonSection.style.display = '';
     } finally {
-      btn.disabled    = false;
-      btn.textContent = '🔍 Load Parameters';
+      loadBtn.disabled    = false;
+      loadBtn.textContent = 'Load Parameters';
     }
   });
 
+  /* == Format / path detection == */
+  const FILE_FORMATS = new Set(['file-path', 'file-path-pattern']);
+  const DIR_FORMATS  = new Set(['directory-path']);
+  const PATH_FORMATS = new Set(['path', 'file-path', 'file-path-pattern', 'directory-path']);
+  const FILE_KEY_RE  = /^(input|samplesheet|sample_sheet|reads|bam|vcf|bed|fasta|gtf|gff|csv|tsv|manifest)$/i;
+  const DIR_KEY_RE   = /^(outdir|output|output_dir|results|publish_dir|workdir)$/i;
+
+  function guessFormat(p) {
+    if (p.format) return p.format;
+    if (FILE_KEY_RE.test(p.key)) return 'file-path';
+    if (DIR_KEY_RE.test(p.key))  return 'directory-path';
+    return '';
+  }
+
   function buildField(p, isRequired) {
+    const fmt    = guessFormat(p);
+    const isFile = FILE_FORMATS.has(fmt);
+    const isDir  = DIR_FORMATS.has(fmt);
+    const isPath = PATH_FORMATS.has(fmt);
+
     const wrap = document.createElement('div');
     wrap.className = 'param-group';
 
     const label = document.createElement('label');
-    label.htmlFor = 'param__' + p.key;
+    label.htmlFor     = 'param__' + p.key;
     label.textContent = p.key;
     if (isRequired) {
       const star = document.createElement('span');
-      star.className = 'param-required-star';
+      star.className   = 'param-required-star';
       star.textContent = ' *';
       label.appendChild(star);
     }
@@ -174,24 +245,20 @@
     if (p.choices && p.choices.length > 0) {
       input = document.createElement('select');
       const empty = document.createElement('option');
-      empty.value = '';
-      empty.textContent = '— select —';
+      empty.value = ''; empty.textContent = '- select -';
       input.appendChild(empty);
       p.choices.forEach(c => {
         const opt = document.createElement('option');
-        opt.value = c;
-        opt.textContent = c;
+        opt.value = c; opt.textContent = c;
         if (p.default !== null && String(p.default) === c) opt.selected = true;
         input.appendChild(opt);
       });
 
     } else if (p.type === 'boolean') {
       input = document.createElement('input');
-      input.type    = 'checkbox';
-      input.value   = 'true';
+      input.type  = 'checkbox';
+      input.value = 'true';
       if (p.default === true || p.default === 'true') input.checked = true;
-      // Checkbox uses special serialisation: only included when checked
-      // We'll use a hidden companion field + checkbox approach
       const hidden = document.createElement('input');
       hidden.type  = 'hidden';
       hidden.name  = 'param__' + p.key;
@@ -208,17 +275,42 @@
       input = document.createElement('input');
       input.type = 'text';
       if (p.default !== null && p.default !== undefined) input.value = p.default;
-      if (p.key === 'input' || p.key === 'samplesheet') {
-        input.placeholder = 'Path to samplesheet CSV';
-      } else if (p.key === 'outdir' || p.key === 'output') {
-        input.placeholder = 'results';
-      }
+      if (isFile)     input.placeholder = 'Path to file';
+      else if (isDir) input.placeholder = 'Path to directory';
     }
 
-    input.id       = 'param__' + p.key;
+    input.id = 'param__' + p.key;
     if (input.type !== 'checkbox') input.name = 'param__' + p.key;
     if (isRequired && input.type !== 'checkbox') input.required = true;
-    wrap.appendChild(input);
+
+    if (isPath && input.type === 'text') {
+      const row = document.createElement('div');
+      row.className = 'param-input-row';
+      row.appendChild(input);
+
+      const browseBtn = document.createElement('button');
+      browseBtn.type        = 'button';
+      browseBtn.className   = 'btn btn-secondary btn-sm fs-browse-btn';
+      browseBtn.title       = isDir ? 'Browse for a directory' : 'Browse for a file';
+      browseBtn.textContent = 'Browse';
+      browseBtn.dataset.target = 'param__' + p.key;
+      browseBtn.dataset.mode   = isDir ? 'dir' : 'file';
+      row.appendChild(browseBtn);
+
+      if (isFile) {
+        const uploadBtn = document.createElement('button');
+        uploadBtn.type        = 'button';
+        uploadBtn.className   = 'btn btn-secondary btn-sm';
+        uploadBtn.title       = 'Upload a file from your computer';
+        uploadBtn.textContent = 'Upload';
+        uploadBtn.addEventListener('click', () => triggerUpload(input));
+        row.appendChild(uploadBtn);
+      }
+
+      wrap.appendChild(row);
+    } else {
+      wrap.appendChild(input);
+    }
 
     if (p.description) {
       const desc = document.createElement('div');
@@ -229,6 +321,229 @@
 
     return wrap;
   }
+
+  /* == File upload (AJAX) == */
+  function triggerUpload(targetInput) {
+    const picker = document.createElement('input');
+    picker.type  = 'file';
+    picker.style.display = 'none';
+    document.body.appendChild(picker);
+
+    picker.addEventListener('change', async () => {
+      const file = picker.files[0];
+      document.body.removeChild(picker);
+      if (!file) return;
+
+      const prev = targetInput.value;
+      targetInput.value    = 'Uploading...';
+      targetInput.disabled = true;
+
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const resp = await fetch('/api/fs/upload', { method: 'POST', body: fd });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'Upload failed');
+        targetInput.value = data.path;
+      } catch (err) {
+        alert('Upload failed: ' + err.message);
+        targetInput.value = prev;
+      } finally {
+        targetInput.disabled = false;
+        targetInput.focus();
+      }
+    });
+
+    picker.click();
+  }
+
+  /* == Filesystem browser modal == */
+  const modal       = document.getElementById('fs-modal');
+  const backdrop    = document.getElementById('fs-modal-backdrop');
+  const modalClose  = document.getElementById('fs-modal-close');
+  const modalCancel = document.getElementById('fs-modal-cancel');
+  const modalSelect = document.getElementById('fs-modal-select');
+  const modalList   = document.getElementById('fs-modal-list');
+  const modalCrumbs = document.getElementById('fs-modal-crumbs');
+  const modalSelEl  = document.getElementById('fs-modal-selected');
+
+  let _targetInput  = null;
+  let _browseMode   = 'file';
+  let _selectedPath = null;
+
+  function openBrowser(input, mode) {
+    _targetInput  = input;
+    _browseMode   = mode;
+    _selectedPath = null;
+    modalSelEl.textContent = '';
+    modalSelect.disabled   = true;
+    modal.style.display    = '';
+    modalList.innerHTML    = '<div style="padding:1rem;color:var(--muted);">Loading...</div>';
+    modalCrumbs.innerHTML  = '';
+
+    const existing = input.value.trim();
+    if (existing && !existing.startsWith('Uploading')) {
+      const startPath = (mode === 'dir')
+        ? existing
+        : (existing.includes('/') ? existing.substring(0, existing.lastIndexOf('/')) || '/' : '');
+      if (startPath) { loadDir(startPath); return; }
+    }
+    loadRoots();
+  }
+
+  function closeModal() {
+    modal.style.display = 'none';
+    _targetInput = null;
+  }
+
+  modalClose.addEventListener('click', closeModal);
+  modalCancel.addEventListener('click', closeModal);
+  backdrop.addEventListener('click', closeModal);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && modal.style.display !== 'none') closeModal();
+  });
+  modalSelect.addEventListener('click', () => {
+    if (_selectedPath && _targetInput) _targetInput.value = _selectedPath;
+    closeModal();
+  });
+
+  async function loadRoots() {
+    modalCrumbs.innerHTML = '<span style="color:var(--muted)">Filesystem roots</span>';
+    try {
+      const resp = await fetch('/api/fs/roots');
+      if (!resp.ok) { renderError('Could not load filesystem roots.'); return; }
+      const data  = await resp.json();
+      const roots = data.roots || [];
+      if (roots.length === 0) { renderError('No browseable roots configured.'); return; }
+      if (roots.length === 1) { loadDir(roots[0]); return; }
+      renderEntries({ path: null, parent: null,
+        entries: roots.map(r => ({ name: r, path: r, is_dir: true, size: null })) });
+    } catch (_e) {
+      renderError('Failed to load filesystem roots.');
+    }
+  }
+
+  async function loadDir(path) {
+    modalList.innerHTML = '<div style="padding:1rem;color:var(--muted);">Loading...</div>';
+    try {
+      const resp = await fetch('/api/fs/browse?path=' + encodeURIComponent(path));
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        renderError(data.detail || 'Error ' + resp.status);
+        return;
+      }
+      renderEntries(await resp.json());
+    } catch (_e) {
+      renderError('Network error loading directory.');
+    }
+  }
+
+  function renderCrumbs(path) {
+    modalCrumbs.innerHTML = '';
+    const parts = path.split('/').filter(Boolean);
+    const paths  = ['/', ...parts.map((_, i) => '/' + parts.slice(0, i + 1).join('/'))];
+    const labels = ['/', ...parts];
+    labels.forEach((lbl, i) => {
+      if (i > 0) modalCrumbs.appendChild(document.createTextNode(' / '));
+      if (i < labels.length - 1) {
+        const a = document.createElement('a');
+        a.className   = 'fs-crumb-link';
+        a.textContent = lbl;
+        a.title       = paths[i];
+        a.addEventListener('click', () => loadDir(paths[i]));
+        modalCrumbs.appendChild(a);
+      } else {
+        const sp = document.createElement('span');
+        sp.textContent = lbl;
+        modalCrumbs.appendChild(sp);
+      }
+    });
+  }
+
+  function renderEntries(data) {
+    modalList.innerHTML = '';
+    if (data.path) renderCrumbs(data.path);
+    else modalCrumbs.innerHTML = '<span style="color:var(--muted)">Filesystem roots</span>';
+
+    if (data.parent) modalList.appendChild(makeEntry({ name: '..', path: data.parent, is_dir: true }));
+
+    (data.entries || []).forEach(entry => {
+      if (!entry.error) modalList.appendChild(makeEntry(entry));
+    });
+
+    if (modalList.children.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:1rem;color:var(--muted);font-style:italic;';
+      empty.textContent = 'Empty directory';
+      modalList.appendChild(empty);
+    }
+  }
+
+  function makeEntry(entry) {
+    const row = document.createElement('div');
+    row.className = 'fs-entry';
+
+    const icon = document.createElement('span');
+    icon.style.flexShrink = '0';
+    icon.textContent      = entry.is_dir ? '[DIR]' : '[FILE]';
+    icon.style.color      = 'var(--muted)';
+    icon.style.fontSize   = '0.75rem';
+    icon.style.minWidth   = '3.5rem';
+    row.appendChild(icon);
+
+    const name = document.createElement('span');
+    name.className   = 'fs-name';
+    name.textContent = entry.name;
+    row.appendChild(name);
+
+    if (!entry.is_dir && entry.size != null) {
+      const meta = document.createElement('span');
+      meta.className   = 'fs-meta';
+      meta.textContent = fmtSize(entry.size);
+      row.appendChild(meta);
+    }
+
+    row.addEventListener('click', () => {
+      if (entry.is_dir) {
+        if (_browseMode === 'dir') {
+          document.querySelectorAll('.fs-entry.fs-selected').forEach(el => el.classList.remove('fs-selected'));
+          row.classList.add('fs-selected');
+          _selectedPath          = entry.path;
+          modalSelEl.textContent = entry.path;
+          modalSelect.disabled   = false;
+        }
+        loadDir(entry.path);
+      } else if (_browseMode !== 'dir') {
+        document.querySelectorAll('.fs-entry.fs-selected').forEach(el => el.classList.remove('fs-selected'));
+        row.classList.add('fs-selected');
+        _selectedPath          = entry.path;
+        modalSelEl.textContent = entry.path;
+        modalSelect.disabled   = false;
+      }
+    });
+
+    return row;
+  }
+
+  function renderError(msg) {
+    modalList.innerHTML = '<div style="padding:1rem;color:var(--danger);">' + msg + '</div>';
+  }
+
+  function fmtSize(bytes) {
+    if (bytes < 1024)       return bytes + ' B';
+    if (bytes < 1048576)    return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+    return (bytes / 1073741824).toFixed(2) + ' GB';
+  }
+
+  /* == Wire all .fs-browse-btn clicks (static + dynamically built) == */
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('.fs-browse-btn');
+    if (!btn) return;
+    const input = document.getElementById(btn.dataset.target);
+    if (input) openBrowser(input, btn.dataset.mode || 'file');
+  });
+
 })();
 </script>
 {% endblock %}

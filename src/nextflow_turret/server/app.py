@@ -619,6 +619,11 @@ def create_app(
             ),
         )
 
+    @app.get("/api/fs/roots", tags=["api"])
+    async def fs_roots():
+        """Return the list of allowed filesystem browse roots."""
+        return {"roots": [str(r) for r in _resolved_roots]}
+
     @app.get("/api/fs/browse", tags=["api"])
     async def fs_browse(path: str = Query("/", description="Absolute directory path to list")):
         """List the contents of a server-side directory.
