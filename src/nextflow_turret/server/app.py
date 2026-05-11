@@ -762,6 +762,28 @@ def create_app(
 
         return {"path": str(dest), "filename": dest.name, "size": dest.stat().st_size, "project": safe_project}
 
+    @app.post("/api/fs/mkdir", tags=["api"])
+    async def fs_mkdir(
+        path: str = Query(..., description="Absolute path of the directory to create"),
+    ):
+        """Create a new directory on the server.
+
+        The target path must be under one of the configured browse roots.
+        Intermediate directories are created as needed (``mkdir -p`` semantics).
+        Returns 409 if the path already exists and is not a directory.
+        """
+        target = Path(path).resolve()
+        _assert_under_root(target)
+        if target.exists():
+            if target.is_dir():
+                return {"path": str(target), "created": False}
+            raise HTTPException(409, detail=f"Path exists and is not a directory: {path}")
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(500, detail=f"Failed to create directory: {exc}") from exc
+        return {"path": str(target), "created": True}
+
     # ------------------------------------------------------------------ #
     # Config editor endpoints                                              #
     # ------------------------------------------------------------------ #

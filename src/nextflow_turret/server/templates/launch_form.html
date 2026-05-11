@@ -141,12 +141,26 @@
                     color:var(--text);outline:none;">
     </div>
     <div id="fs-modal-list" style="flex:1;overflow-y:auto;"></div>
+    <!-- New-folder inline input (hidden by default) -->
+    <div id="fs-mkdir-row"
+         style="display:none;padding:0.4rem 0.75rem;border-top:1px solid var(--border);
+                background:var(--bg);gap:0.4rem;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:0.82rem;color:var(--text-dim);flex-shrink:0;">New folder name:</span>
+      <input type="text" id="fs-mkdir-name"
+             placeholder="folder-name"
+             style="flex:1;min-width:8rem;background:var(--surface);border:1px solid var(--border);
+                    border-radius:4px;padding:0.28rem 0.55rem;font-size:0.8125rem;color:var(--text);outline:none;">
+      <button type="button" id="fs-mkdir-confirm" class="btn btn-primary btn-sm">Create</button>
+      <button type="button" id="fs-mkdir-cancel"  class="btn btn-secondary btn-sm">Cancel</button>
+    </div>
     <div style="display:flex;justify-content:space-between;align-items:center;
                 padding:0.65rem 1rem;border-top:1px solid var(--border);background:var(--bg);">
       <span id="fs-modal-selected"
             style="font-size:0.8rem;color:var(--muted);overflow:hidden;
                    text-overflow:ellipsis;max-width:60%;white-space:nowrap;"></span>
       <div style="display:flex;gap:0.5rem;">
+        <button type="button" id="fs-mkdir-open" class="btn btn-secondary btn-sm"
+                title="Create a new folder in the current directory">&#128193; New Folder</button>
         <button type="button" id="fs-modal-cancel" class="btn btn-secondary btn-sm">Cancel</button>
         <button type="button" id="fs-modal-select" class="btn btn-primary btn-sm" disabled>Select</button>
       </div>
@@ -500,21 +514,27 @@
   }
 
   /* == Filesystem browser modal == */
-  const modal       = document.getElementById('fs-modal');
-  const backdrop    = document.getElementById('fs-modal-backdrop');
-  const modalClose  = document.getElementById('fs-modal-close');
-  const modalCancel = document.getElementById('fs-modal-cancel');
-  const modalSelect = document.getElementById('fs-modal-select');
-  const modalList   = document.getElementById('fs-modal-list');
-  const modalCrumbs = document.getElementById('fs-modal-crumbs');
-  const modalSelEl  = document.getElementById('fs-modal-selected');
-  const modalSearch = document.getElementById('fs-modal-search');
+  const modal        = document.getElementById('fs-modal');
+  const backdrop     = document.getElementById('fs-modal-backdrop');
+  const modalClose   = document.getElementById('fs-modal-close');
+  const modalCancel  = document.getElementById('fs-modal-cancel');
+  const modalSelect  = document.getElementById('fs-modal-select');
+  const modalList    = document.getElementById('fs-modal-list');
+  const modalCrumbs  = document.getElementById('fs-modal-crumbs');
+  const modalSelEl   = document.getElementById('fs-modal-selected');
+  const modalSearch  = document.getElementById('fs-modal-search');
+  const mkdirOpen    = document.getElementById('fs-mkdir-open');
+  const mkdirRow     = document.getElementById('fs-mkdir-row');
+  const mkdirName    = document.getElementById('fs-mkdir-name');
+  const mkdirConfirm = document.getElementById('fs-mkdir-confirm');
+  const mkdirCancel  = document.getElementById('fs-mkdir-cancel');
 
   let _targetInput  = null;
   let _browseMode   = 'file';
   let _selectedPath = null;
   let _allEntries   = [];   // full unfiltered entry list for current directory
   let _parentEntry  = null; // { name:'..', path, is_dir:true } or null
+  let _currentDir   = null; // absolute path of the directory currently shown
 
   /* Filter current listing by search term (client-side, no network call) */
   function applyFilter(term) {
@@ -595,8 +615,55 @@
   function closeModal() {
     modal.style.display = 'none';
     modalSearch.value   = '';
+    hideMkdirRow();
     _targetInput = null;
   }
+
+  /* === New-folder (mkdir) logic === */
+  function hideMkdirRow() {
+    mkdirRow.style.display = 'none';
+    mkdirName.value = '';
+  }
+
+  mkdirOpen.addEventListener('click', () => {
+    mkdirRow.style.display = 'flex';
+    mkdirName.value = '';
+    mkdirName.focus();
+  });
+  mkdirCancel.addEventListener('click', hideMkdirRow);
+
+  mkdirName.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); mkdirConfirm.click(); }
+    if (e.key === 'Escape') hideMkdirRow();
+  });
+
+  mkdirConfirm.addEventListener('click', async () => {
+    const raw  = mkdirName.value.trim();
+    if (!raw || !_currentDir) return;
+    // Reject names that look like path separators or traversal
+    if (raw.includes('/') || raw.includes('\\') || raw === '.' || raw === '..') {
+      alert('Please enter a simple folder name without slashes.');
+      return;
+    }
+    const newPath = _currentDir.replace(/\/+$/, '') + '/' + raw;
+    mkdirConfirm.disabled = true;
+    try {
+      const resp = await fetch('/api/fs/mkdir?path=' + encodeURIComponent(newPath), { method: 'POST' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) { alert('Could not create folder: ' + (data.detail || resp.status)); return; }
+      hideMkdirRow();
+      // Reload the current directory to show the new folder
+      await loadDir(_currentDir);
+      // Auto-select the newly created folder in dir-browse mode
+      if (_browseMode === 'dir') {
+        _selectedPath          = data.path;
+        modalSelEl.textContent = data.path;
+        modalSelect.disabled   = false;
+      }
+    } finally {
+      mkdirConfirm.disabled = false;
+    }
+  });
 
   modalClose.addEventListener('click', closeModal);
   modalCancel.addEventListener('click', closeModal);
@@ -664,10 +731,15 @@
 
   function renderEntries(data) {
     // Store entries for client-side filtering; respect dir-mode file suppression
-    _allEntries = (data.entries || []).filter(
+    _allEntries  = (data.entries || []).filter(
       e => !e.error && (_browseMode !== 'dir' || e.is_dir)
     );
     _parentEntry = data.parent ? { name: '..', path: data.parent, is_dir: true } : null;
+    _currentDir  = data.path || null;
+
+    // New-folder button only makes sense inside a real directory
+    mkdirOpen.style.display = _currentDir ? '' : 'none';
+    hideMkdirRow();
 
     modalSearch.value = '';  // clear filter on directory change
     if (data.path) renderCrumbs(data.path);
