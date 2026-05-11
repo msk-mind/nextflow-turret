@@ -40,6 +40,7 @@ POST    /launches/{id}/cancel        Cancel a launch (HTML form)
 """
 from __future__ import annotations
 
+import asyncio
 import collections
 import json
 import os
@@ -65,7 +66,7 @@ from ..auth import AuthConfig, AuthManager, AuthMiddleware, AuthMode, safe_next_
 from ..handlers import TowerRouter
 from ..db.store import RunStore
 from ..launcher.launcher import Launcher
-from ..schema import fetch_pipeline_schema, fetch_pipeline_profiles, fetch_pipeline_refs, fetch_pipeline_config_text
+from ..schema import fetch_pipeline_schema, fetch_pipeline_profiles, fetch_pipeline_refs, fetch_pipeline_config_text, resolve_pipeline_clone_url
 from ..state import _task_counts_from_progress
 from .registry import PersistentWorkflowRegistry
 
@@ -783,6 +784,65 @@ def create_app(
         except OSError as exc:
             raise HTTPException(500, detail=f"Failed to create directory: {exc}") from exc
         return {"path": str(target), "created": True}
+
+    @app.post("/api/pipeline/clone", tags=["api"])
+    async def pipeline_clone(
+        pipeline: str           = Query(..., description="Pipeline identifier (org/repo, full URL)"),
+        path:     str           = Query(..., description="Destination parent directory; pipeline is cloned into a sub-directory"),
+        revision: Optional[str] = Query(default=None, description="Branch or tag to clone"),
+    ):
+        """Clone a remote pipeline into a sub-directory of *path*.
+
+        Resolves ``pipeline`` to a ``git clone``-able HTTPS URL, then runs::
+
+            git clone [--branch <revision>] <url> <path>/<repo-name>
+
+        Returns ``{"dest": "...", "repo": "..."}`` on success.
+        Raises 400 for local paths, 409 if the destination already exists.
+        """
+        clone_url = resolve_pipeline_clone_url(pipeline)
+        if clone_url is None:
+            raise HTTPException(400, detail="Pipeline must be a remote URL or 'org/repo' short-form (not a local path)")
+
+        parent = Path(path).resolve()
+        _assert_under_root(parent)
+
+        # Derive repo name from URL (strip .git suffix)
+        repo_name = clone_url.rstrip("/").rsplit("/", 1)[-1]
+        if repo_name.endswith(".git"):
+            repo_name = repo_name[:-4]
+
+        dest = parent / repo_name
+        if dest.exists():
+            raise HTTPException(409, detail=f"Destination already exists: {dest}")
+
+        parent.mkdir(parents=True, exist_ok=True)
+
+        cmd = ["git", "clone", "--depth", "1"]
+        if revision:
+            cmd += ["--branch", revision]
+        cmd += [clone_url, str(dest)]
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                raise HTTPException(504, detail="git clone timed out after 180 s")
+        except FileNotFoundError:
+            raise HTTPException(500, detail="git is not installed or not on PATH") from None
+
+        if proc.returncode != 0:
+            msg = stderr.decode(errors="replace").strip().splitlines()
+            raise HTTPException(500, detail="git clone failed: " + (msg[-1] if msg else "unknown error"))
+
+        return {"dest": str(dest), "repo": repo_name}
 
     # ------------------------------------------------------------------ #
     # Config editor endpoints                                              #

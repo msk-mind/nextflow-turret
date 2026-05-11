@@ -109,6 +109,20 @@ def _resolve_file_url(pipeline: str, filename: str, revision: Optional[str] = No
     if pipeline.startswith("/") or pipeline.startswith("."):
         return None
 
+    # SSH URL: git@github.com:owner/repo[.git]
+    ssh = re.match(
+        r"git@(github\.com|gitlab\.com|bitbucket\.org):([^/]+)/([^/\s]+?)(?:\.git)?$",
+        pipeline.strip(),
+    )
+    if ssh:
+        host, owner, repo = ssh.group(1), ssh.group(2), ssh.group(3)
+        if host == "github.com":
+            return _raw_github_url(owner, repo, rev, filename)
+        if host == "gitlab.com":
+            return f"https://gitlab.com/{owner}/{repo}/-/raw/{rev}/{filename}"
+        if host == "bitbucket.org":
+            return f"https://bitbucket.org/{owner}/{repo}/raw/{rev}/{filename}"
+
     # Full https:// URL (GitHub / GitLab / Bitbucket)
     m = re.match(
         r"https?://(github\.com|gitlab\.com|bitbucket\.org)/([^/]+)/([^/\s]+?)(?:\.git)?/?$",
@@ -341,18 +355,29 @@ def fetch_pipeline_refs(
     if pipeline.startswith("/") or pipeline.startswith("."):
         return empty
 
-    # Parse owner/repo from URL or short form
-    m = re.match(
-        r"https?://github\.com/([^/]+)/([^/\s]+?)(?:\.git)?/?$",
-        pipeline.strip(),
-    )
-    if m:
-        owner, repo = m.group(1), m.group(2)
-    else:
-        short = re.match(r"^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:@[^\s]+)?$", pipeline.strip())
-        if not short:
-            return empty
-        owner, repo = short.group(1), short.group(2)
+    p = pipeline.strip()
+    owner: Optional[str] = None
+    repo:  Optional[str] = None
+
+    # SSH URL: git@github.com:owner/repo[.git]
+    ssh = re.match(r"git@github\.com:([^/]+)/([^/\s]+?)(?:\.git)?$", p)
+    if ssh:
+        owner, repo = ssh.group(1), ssh.group(2)
+
+    if owner is None:
+        # HTTPS GitHub URL
+        m = re.match(r"https?://github\.com/([^/]+)/([^/\s]+?)(?:\.git)?/?$", p)
+        if m:
+            owner, repo = m.group(1), m.group(2)
+
+    if owner is None:
+        # Short form: "owner/repo" or "owner/repo@revision"
+        short = re.match(r"^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:@[^\s]+)?$", p)
+        if short:
+            owner, repo = short.group(1), short.group(2)
+
+    if owner is None:
+        return empty
 
     def _gh_list(endpoint: str) -> list[str]:
         url = f"https://api.github.com/repos/{owner}/{repo}/{endpoint}?per_page=100"
@@ -430,3 +455,38 @@ def fetch_pipeline_profiles(
         return []
 
     return _parse_profiles(text)
+
+
+def resolve_pipeline_clone_url(pipeline: str) -> Optional[str]:
+    """Return a ``git clone``-able URL for *pipeline*, or ``None``.
+
+    Handles:
+    - ``git@github.com:owner/repo[.git]``  → passed through as-is
+    - Any other ``git@host:...`` SSH URL    → passed through as-is
+    - ``owner/repo``                        → ``https://github.com/owner/repo.git``
+    - ``owner/repo@revision``               → ``https://github.com/owner/repo.git``
+    - Full ``https://`` URLs                → normalised (strip trailing slash / .git, re-add .git)
+    - Local paths                           → ``None`` (nothing to clone)
+    """
+    p = pipeline.strip()
+    if not p or p.startswith("/") or p.startswith("."):
+        return None
+
+    # SSH URL: git@host:owner/repo[.git]  — pass through unchanged
+    if re.match(r"git@[^:]+:[^/\s]+/[^\s]+", p):
+        return p if p.endswith(".git") else p + ".git"
+
+    # Full https:// URL (any host)
+    m = re.match(
+        r"(https?://(?:github\.com|gitlab\.com|bitbucket\.org)/[^/]+/[^/\s]+?)(?:\.git)?/?$",
+        p,
+    )
+    if m:
+        return m.group(1) + ".git"
+
+    # Short form: "owner/repo" or "owner/repo@revision"
+    short = re.match(r"^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:@[^\s]+)?$", p)
+    if short:
+        return f"https://github.com/{short.group(1)}/{short.group(2)}.git"
+
+    return None

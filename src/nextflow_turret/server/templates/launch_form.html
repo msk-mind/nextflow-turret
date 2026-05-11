@@ -19,7 +19,7 @@
       <label for="pipeline">Pipeline <span style="color:var(--danger)">*</span></label>
       <div class="param-input-row">
         <input type="text" id="pipeline" name="pipeline" required
-               placeholder="nf-core/rnaseq  or  https://github.com/org/repo  or  /local/path"
+               placeholder="nf-core/rnaseq  or  https://github.com/org/repo  or  git@github.com:org/repo.git  or  /local/path"
                value="{{ form.pipeline or '' }}">
         <button type="button" class="btn btn-secondary btn-sm fs-browse-btn"
                 data-target="pipeline" data-mode="dir" title="Browse for local pipeline directory">&#128193;</button>
@@ -60,6 +60,14 @@
                 data-target="project_dir" data-mode="dir" title="Browse filesystem">&#128193;</button>
       </div>
       <small class="muted" id="project-dir-hint">Uploaded files and <code>nextflow.config</code> are placed here.</small>
+    </div>
+
+    <!-- Clone pipeline button — shown when pipeline is remote and project_dir is set -->
+    <div id="clone-row" style="display:none;margin-bottom:1rem;">
+      <button type="button" id="clone-btn" class="btn btn-secondary btn-sm">
+        &#128229; Clone pipeline to project dir
+      </button>
+      <span id="clone-status" style="margin-left:0.6rem;font-size:0.82rem;color:var(--muted);"></span>
     </div>
 
     <div class="form-row">
@@ -225,9 +233,19 @@
   const projectDirHint = document.getElementById('project-dir-hint');
   const configEditLink   = document.getElementById('config-edit-link');
   const configEditAnchor = document.getElementById('config-edit-anchor');
+  const cloneRow    = document.getElementById('clone-row');
+  const cloneBtn    = document.getElementById('clone-btn');
+  const cloneStatus = document.getElementById('clone-status');
 
   /* Returns true when pipeline value looks like a local filesystem path */
   function _pipelineIsLocal(val) { return val.startsWith('/') || val.startsWith('.'); }
+
+  /* Show/hide clone button based on current field values */
+  function _updateCloneRow() {
+    const pipe = pipelineEl.value.trim();
+    const dir  = projectDirEl.value.trim();
+    cloneRow.style.display = (!_pipelineIsLocal(pipe) && pipe && dir) ? '' : 'none';
+  }
 
   /* Called whenever the pipeline input changes — syncs dependent fields */
   function _onPipelineChange() {
@@ -249,12 +267,51 @@
       projectDirHint.innerHTML =
         'Uploaded files and <code>nextflow.config</code> are placed here.';
     }
+    _updateCloneRow();
   }
 
   pipelineEl.addEventListener('input', _onPipelineChange);
   pipelineEl.addEventListener('change', _onPipelineChange);
+  projectDirEl.addEventListener('input', _updateCloneRow);
+  projectDirEl.addEventListener('change', _updateCloneRow);
   // Run once on page load in case form is pre-filled
   _onPipelineChange();
+
+  /* == Clone pipeline handler == */
+  cloneBtn.addEventListener('click', async () => {
+    const pipeline = pipelineEl.value.trim();
+    const projDir  = projectDirEl.value.trim();
+    if (!pipeline || !projDir) return;
+
+    const revision = document.getElementById('revision').value.trim();
+    let qs = '/api/pipeline/clone?pipeline=' + encodeURIComponent(pipeline)
+           + '&path=' + encodeURIComponent(projDir);
+    if (revision) qs += '&revision=' + encodeURIComponent(revision);
+
+    cloneBtn.disabled    = true;
+    cloneStatus.style.color = 'var(--muted)';
+    cloneStatus.textContent = 'Cloning… this may take a moment.';
+
+    try {
+      const resp = await fetch(qs, { method: 'POST' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        cloneStatus.style.color = 'var(--danger)';
+        cloneStatus.textContent = 'Clone failed: ' + (data.detail || resp.status);
+        return;
+      }
+      cloneStatus.style.color = 'var(--success)';
+      cloneStatus.textContent = 'Cloned to ' + data.dest;
+      // Switch pipeline field to the local clone and trigger change
+      pipelineEl.value = data.dest;
+      _onPipelineChange();
+    } catch (err) {
+      cloneStatus.style.color = 'var(--danger)';
+      cloneStatus.textContent = 'Network error: ' + err.message;
+    } finally {
+      cloneBtn.disabled = false;
+    }
+  });
 
   function _selectedProfiles() {
     return profileInput.value.split(',').map(s => s.trim()).filter(Boolean);
