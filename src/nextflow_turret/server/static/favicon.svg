@@ -1,5 +1,63 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="4" fill="#0f1117"/>
-  <!-- Castle rook top: 3 merlons + base platform -->
-  <path d="M2,30 L2,2 L9,2 L9,14 L13,14 L13,2 L19,2 L19,14 L23,14 L23,2 L30,2 L30,30 Z" fill="#4f8ef7"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <clipPath id="c"><rect width="64" height="64" rx="12"/></clipPath>
+  </defs>
+  <!-- Background -->
+  <rect width="64" height="64" rx="12" fill="#0f1117"/>
+  <g clip-path="url(#c)">
+    <!-- Tower body -->
+    <rect x="13" y="26" width="38" height="38" fill="#c8daee"/>
+    <!-- Cylindrical shading: right side darker -->
+    <rect x="44" y="26" width="7" height="38" fill="#8aa4bf" opacity="0.55"/>
+    <!-- Left edge highlight -->
+    <rect x="13" y="26" width="5" height="38" fill="#deeeff" opacity="0.4"/>
+
+    <!-- === Merlons — back row first (will be covered by parapet) === -->
+    <rect x="27" y="8"  width="8" height="16" rx="2" fill="#9ab8d4"/>
+    <rect x="14" y="9"  width="7" height="16" rx="2" fill="#9ab8d4"/>
+    <rect x="43" y="9"  width="7" height="16" rx="2" fill="#9ab8d4"/>
+
+    <!-- Parapet ring surface (covers back merlon bases) -->
+    <ellipse cx="32" cy="26" rx="22" ry="5.5" fill="#cce0f4"/>
+    <!-- Parapet rim depth -->
+    <ellipse cx="32" cy="28" rx="22" ry="5.5" fill="#a4bcd8"/>
+    <!-- Parapet top face (re-draw over rim) -->
+    <ellipse cx="32" cy="26" rx="22" ry="5.5" fill="#d8eaf8"/>
+    <ellipse cx="32" cy="26" rx="22" ry="5.5" fill="none" stroke="#8aacc8" stroke-width="0.7"/>
+
+    <!-- Front merlons (overlap parapet) -->
+    <rect x="4"  y="13" width="9"  height="16" rx="2" fill="#c0d8f0"/>
+    <rect x="51" y="13" width="9"  height="16" rx="2" fill="#c0d8f0"/>
+
+    <!-- === Brick texture === -->
+    <!-- Horizontal mortar courses -->
+    <rect x="13" y="33" width="38" height="0.8" fill="#7a9ab8" opacity="0.7"/>
+    <rect x="13" y="41" width="38" height="0.8" fill="#7a9ab8" opacity="0.7"/>
+    <rect x="13" y="49" width="38" height="0.8" fill="#7a9ab8" opacity="0.7"/>
+    <rect x="13" y="57" width="38" height="0.8" fill="#7a9ab8" opacity="0.7"/>
+    <!-- Vertical joints row 26-33 -->
+    <rect x="21" y="26" width="0.7" height="7" fill="#7a9ab8" opacity="0.7"/>
+    <rect x="32" y="26" width="0.7" height="7" fill="#7a9ab8" opacity="0.7"/>
+    <rect x="44" y="26" width="0.7" height="7" fill="#7a9ab8" opacity="0.7"/>
+    <!-- Joints row 33-41 -->
+    <rect x="17" y="33" width="0.7" height="8" fill="#7a9ab8" opacity="0.7"/>
+    <rect x="27" y="33" width="0.7" height="8" fill="#7a9ab8" opacity="0.7"/>
+    <rect x="39" y="33" width="0.7" height="8" fill="#7a9ab8" opacity="0.7"/>
+    <rect x="48" y="33" width="0.7" height="8" fill="#7a9ab8" opacity="0.7"/>
+    <!-- Joints row 41-49 -->
+    <rect x="22" y="41" width="0.7" height="8" fill="#7a9ab8" opacity="0.7"/>
+    <rect x="44" y="41" width="0.7" height="8" fill="#7a9ab8" opacity="0.7"/>
+    <!-- Joints row 49-57 -->
+    <rect x="17" y="49" width="0.7" height="8" fill="#7a9ab8" opacity="0.7"/>
+    <rect x="30" y="49" width="0.7" height="8" fill="#7a9ab8" opacity="0.7"/>
+    <rect x="42" y="49" width="0.7" height="8" fill="#7a9ab8" opacity="0.7"/>
+
+    <!-- === Arched window === -->
+    <path d="M26,43 L26,57 L38,57 L38,43 Q32,34.5 26,43 Z" fill="#08111e"/>
+    <path d="M26,43 L26,57 L38,57 L38,43 Q32,34.5 26,43 Z"
+          fill="none" stroke="#506880" stroke-width="1"/>
+    <!-- Stone surround (inner arch) -->
+    <path d="M28,44.5 L28,55.5 L36,55.5 L36,44.5 Q32,38 28,44.5 Z"
+          fill="#0e1d2e" stroke="#3a5570" stroke-width="0.7"/>
+  </g>
 </svg>
