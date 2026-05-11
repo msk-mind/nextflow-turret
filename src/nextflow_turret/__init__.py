@@ -24,6 +24,8 @@ Persistence::
 Utilities::
 
     from nextflow_turret import tower_process_to_slurm_name
+    from nextflow_turret import trace_path_for_log, parse_nf_trace, parse_nf_log
+    from nextflow_turret import parse_elapsed_s, classify_task_failure
 """
 
 from .state import (
@@ -50,7 +52,14 @@ from .handlers import (
 from .db.store import RunStore
 from .server.registry import PersistentWorkflowRegistry
 
-from .utils import tower_process_to_slurm_name
+from .utils import (
+    tower_process_to_slurm_name,
+    trace_path_for_log,
+    parse_nf_trace,
+    parse_nf_log,
+    parse_elapsed_s,
+    classify_task_failure,
+)
 
 __all__ = [
     # State
@@ -76,4 +85,9 @@ __all__ = [
     "PersistentWorkflowRegistry",
     # Utilities
     "tower_process_to_slurm_name",
+    "trace_path_for_log",
+    "parse_nf_trace",
+    "parse_nf_log",
+    "parse_elapsed_s",
+    "classify_task_failure",
 ]
