@@ -33,6 +33,22 @@ _FILE_PATH_FORMATS:      frozenset[str] = frozenset({"file-path", "file-path-pat
 _DIRECTORY_PATH_FORMATS: frozenset[str] = frozenset({"directory-path"})
 _PATH_FORMATS:           frozenset[str] = _FILE_PATH_FORMATS | _DIRECTORY_PATH_FORMATS | {"path"}
 
+# Nextflow meta-parameters that are never useful in a launcher UI.
+_BLOCKED_PARAMS: frozenset[str] = frozenset({
+    "help",
+    "help_full",
+    "show_hidden",
+    "show_hidden_params",  # older nf-core name
+    "monochrome_logs",
+    "monochromeLogs",
+    "version",
+    "validate_params",
+    "validationShowHiddenParams",
+    "validationFailUnrecognisedParams",
+    "validationLenientMode",
+    "validationSchemaIgnoreParams",
+})
+
 
 @dataclass
 class ParamSpec:
@@ -229,7 +245,7 @@ def _parse_schema(schema: dict) -> list[ParamSpec]:
         props        = defn.get("properties", {})
 
         for pkey, pval in props.items():
-            if pkey in seen:
+            if pkey in seen or pkey in _BLOCKED_PARAMS:
                 continue
             seen.add(pkey)
 
@@ -252,7 +268,7 @@ def _parse_schema(schema: dict) -> list[ParamSpec]:
 
     # Also handle top-level properties (pipelines without definitions)
     for pkey, pval in schema.get("properties", {}).items():
-        if pkey in seen:
+        if pkey in seen or pkey in _BLOCKED_PARAMS:
             continue
         seen.add(pkey)
         params.append(ParamSpec(
