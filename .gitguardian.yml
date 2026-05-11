@@ -1,0 +1,8 @@
+# GitGuardian configuration
+# https://docs.gitguardian.com/internal-repositories-monitoring/exclusion
+
+ignore-paths:
+  - tests/         # test fixtures use obviously fake credentials
+
+ignore-detectors:
+  # Suppress specific detector names if needed (add after identifying in GG dashboard)

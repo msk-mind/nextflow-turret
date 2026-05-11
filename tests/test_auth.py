@@ -33,7 +33,7 @@ from nextflow_turret.server.app import create_app
 # Helpers
 # ---------------------------------------------------------------------------
 
-_PASSWORD      = "s3cr3t"
+_PASSWORD      = "s3cr3t"           # pragma: allowlist secret
 _PASSWORD_HASH = make_password_hash(_PASSWORD)
 _USERNAME      = "admin"
 
@@ -41,7 +41,7 @@ _USERNAME      = "admin"
 def _basic_app(*, mode: str = "basic") -> TestClient:
     auth = AuthConfig(
         mode           = AuthMode(mode),
-        session_secret = "test-secret-key",
+        session_secret = "test-secret-key",       # pragma: allowlist secret
         basic          = BasicAuthConfig(username=_USERNAME, password_hash=_PASSWORD_HASH),
     )
     app = create_app(db_path=":memory:", auth_config=auth)
