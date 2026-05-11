@@ -192,12 +192,12 @@
     revisionList.innerHTML = '';
     (refs.branches || []).forEach(b => {
       const opt = document.createElement('option');
-      opt.value = b; opt.label = 'branch';
+      opt.value = b;
       revisionList.appendChild(opt);
     });
     (refs.tags || []).forEach(t => {
       const opt = document.createElement('option');
-      opt.value = t; opt.label = 'tag';
+      opt.value = t;
       revisionList.appendChild(opt);
     });
   }
