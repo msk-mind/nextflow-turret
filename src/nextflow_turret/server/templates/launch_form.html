@@ -115,6 +115,13 @@
          style="padding:0.4rem 1rem;font-size:0.8rem;color:var(--text-dim);
                 border-bottom:1px solid var(--border);background:var(--bg);
                 overflow-x:auto;white-space:nowrap;min-height:2rem;"></div>
+    <div style="padding:0.4rem 0.75rem;border-bottom:1px solid var(--border);background:var(--bg);">
+      <input type="text" id="fs-modal-search"
+             placeholder="Filter entries or type an absolute path and press Enter"
+             style="width:100%;background:var(--surface);border:1px solid var(--border);
+                    border-radius:4px;padding:0.3rem 0.6rem;font-size:0.8125rem;
+                    color:var(--text);outline:none;">
+    </div>
     <div id="fs-modal-list" style="flex:1;overflow-y:auto;"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;
                 padding:0.65rem 1rem;border-top:1px solid var(--border);background:var(--bg);">
@@ -402,20 +409,79 @@
   const modalList   = document.getElementById('fs-modal-list');
   const modalCrumbs = document.getElementById('fs-modal-crumbs');
   const modalSelEl  = document.getElementById('fs-modal-selected');
+  const modalSearch = document.getElementById('fs-modal-search');
 
   let _targetInput  = null;
   let _browseMode   = 'file';
   let _selectedPath = null;
+  let _allEntries   = [];   // full unfiltered entry list for current directory
+  let _parentEntry  = null; // { name:'..', path, is_dir:true } or null
+
+  /* Filter current listing by search term (client-side, no network call) */
+  function applyFilter(term) {
+    const q = term.trim().toLowerCase();
+    modalList.innerHTML = '';
+    if (_parentEntry) modalList.appendChild(makeEntry(_parentEntry));
+
+    const visible = q
+      ? _allEntries.filter(e => e.name.toLowerCase().includes(q))
+      : _allEntries;
+
+    visible.forEach(e => modalList.appendChild(makeEntry(e)));
+
+    if (modalList.children.length === 0 || (modalList.children.length === 1 && _parentEntry)) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:1rem;color:var(--muted);font-style:italic;';
+      empty.textContent = q ? 'No entries match "' + term + '"' : 'Empty directory';
+      modalList.appendChild(empty);
+    }
+  }
+
+  modalSearch.addEventListener('input', () => {
+    const val = modalSearch.value;
+    // Don't filter if it looks like an absolute path the user is typing
+    if (!val.startsWith('/')) applyFilter(val);
+  });
+
+  modalSearch.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const val = modalSearch.value.trim();
+    if (!val) return;
+    if (val.startsWith('/')) {
+      // Navigate directly to the typed path
+      modalSearch.value = '';
+      loadDir(val);
+    } else {
+      // Confirm selection if exactly one entry matches
+      const q = val.toLowerCase();
+      const matches = _allEntries.filter(en => en.name.toLowerCase().includes(q));
+      if (matches.length === 1 && (matches[0].is_dir || _browseMode !== 'dir')) {
+        if (matches[0].is_dir) {
+          loadDir(matches[0].path);
+        } else {
+          _selectedPath          = matches[0].path;
+          modalSelEl.textContent = matches[0].path;
+          modalSelect.disabled   = false;
+        }
+        modalSearch.value = '';
+      }
+    }
+  });
 
   function openBrowser(input, mode) {
     _targetInput  = input;
     _browseMode   = mode;
     _selectedPath = null;
+    _allEntries   = [];
+    _parentEntry  = null;
     modalSelEl.textContent = '';
     modalSelect.disabled   = true;
+    modalSearch.value      = '';
     modal.style.display    = '';
     modalList.innerHTML    = '<div style="padding:1rem;color:var(--muted);">Loading...</div>';
     modalCrumbs.innerHTML  = '';
+    setTimeout(() => modalSearch.focus(), 50);
 
     const existing = input.value.trim();
     if (existing && !existing.startsWith('Uploading')) {
@@ -429,6 +495,7 @@
 
   function closeModal() {
     modal.style.display = 'none';
+    modalSearch.value   = '';
     _targetInput = null;
   }
 
@@ -497,23 +564,17 @@
   }
 
   function renderEntries(data) {
-    modalList.innerHTML = '';
+    // Store entries for client-side filtering; respect dir-mode file suppression
+    _allEntries = (data.entries || []).filter(
+      e => !e.error && (_browseMode !== 'dir' || e.is_dir)
+    );
+    _parentEntry = data.parent ? { name: '..', path: data.parent, is_dir: true } : null;
+
+    modalSearch.value = '';  // clear filter on directory change
     if (data.path) renderCrumbs(data.path);
     else modalCrumbs.innerHTML = '<span style="color:var(--muted)">Filesystem roots</span>';
 
-    if (data.parent) modalList.appendChild(makeEntry({ name: '..', path: data.parent, is_dir: true }));
-
-    (data.entries || []).forEach(entry => {
-      if (!entry.error && (_browseMode !== 'dir' || entry.is_dir))
-        modalList.appendChild(makeEntry(entry));
-    });
-
-    if (modalList.children.length === 0) {
-      const empty = document.createElement('div');
-      empty.style.cssText = 'padding:1rem;color:var(--muted);font-style:italic;';
-      empty.textContent = 'Empty directory';
-      modalList.appendChild(empty);
-    }
+    applyFilter('');
   }
 
   function makeEntry(entry) {
