@@ -17,6 +17,10 @@ HTTP routing::
     from nextflow_turret import TowerRouter
     from nextflow_turret import user_info_response, trace_create_response
 
+Persistence::
+
+    from nextflow_turret import RunStore, PersistentWorkflowRegistry
+
 Utilities::
 
     from nextflow_turret import tower_process_to_slurm_name
@@ -43,6 +47,9 @@ from .handlers import (
     trace_create_response,
 )
 
+from .db.store import RunStore
+from .server.registry import PersistentWorkflowRegistry
+
 from .utils import tower_process_to_slurm_name
 
 __all__ = [
@@ -64,6 +71,9 @@ __all__ = [
     "TowerRouter",
     "user_info_response",
     "trace_create_response",
+    # Persistence
+    "RunStore",
+    "PersistentWorkflowRegistry",
     # Utilities
     "tower_process_to_slurm_name",
 ]
