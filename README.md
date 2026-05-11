@@ -240,3 +240,15 @@ pytest --tb=short -q
 | `tests/test_server.py` | 44 | Server layer (`RunStore`, `PersistentWorkflowRegistry`, all endpoints) |
 | `tests/test_integration.py` | 32 | Cross-layer: Tower→SQLite, restart recovery, concurrency, API/DB/UI consistency |
 | `tests/test_e2e.py` | 34 | Full scenarios: NF trace lifecycle, failed tasks, multi-run dashboard, launch UI journey, error paths |
+
+---
+
+## License
+
+Nextflow Turret is released under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later).
+
+This means:
+- **Free to use, modify, and self-host** for any purpose.
+- If you modify Nextflow Turret and **run it as a network service**, you must make your modified source code available to users of that service.
+
+See [LICENSE](LICENSE) for the full terms.

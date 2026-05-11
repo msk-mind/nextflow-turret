@@ -7,7 +7,7 @@ name = "nextflow-turret"
 version = "0.1.0"
 description = "In-process Nextflow Tower API shim — accumulate -with-tower trace events without a Seqera Platform subscription"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.111",
