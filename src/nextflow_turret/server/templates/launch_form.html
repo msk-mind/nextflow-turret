@@ -40,11 +40,10 @@
     <div class="form-row">
       <label for="profile">Profile</label>
       <input type="text" id="profile" name="profile"
-             list="profile-list"
-             placeholder="e.g. slurm, docker, singularity"
+             placeholder="e.g. slurm,docker  (comma-separated)"
              value="{{ form.profile or '' }}">
-      <datalist id="profile-list"></datalist>
-      <small id="profile-hint" class="muted" style="display:none;"></small>
+      <div id="profile-chips" style="display:none;margin-top:0.4rem;display:none;flex-wrap:wrap;gap:0.35rem;"></div>
+      <small class="muted">Click to select; multiple profiles are comma-separated.</small>
     </div>
 
     <div class="form-row">
@@ -157,6 +156,16 @@
   .fs-entry .fs-meta { font-size:0.75rem; color:var(--muted); white-space:nowrap; flex-shrink:0; }
   .fs-crumb-link { color:var(--accent); cursor:pointer; }
   .fs-crumb-link:hover { text-decoration:underline; }
+  .profile-chip {
+    display:inline-block; padding:0.2rem 0.65rem; border-radius:999px;
+    font-size:0.8125rem; cursor:pointer; user-select:none;
+    border:1px solid var(--border); color:var(--text-dim);
+    background:transparent; transition:background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .profile-chip:hover { border-color:var(--accent); color:var(--text); }
+  .profile-chip.selected {
+    background:rgba(79,142,247,0.18); border-color:var(--accent); color:var(--accent); font-weight:500;
+  }
 </style>
 
 <script>
@@ -171,22 +180,48 @@
   const optEl        = document.getElementById('optional-params');
   const optSection   = document.getElementById('optional-section');
   const jsonSection  = document.getElementById('json-params-section');
-  const profileList  = document.getElementById('profile-list');
-  const profileHint  = document.getElementById('profile-hint');
+  const profileChips = document.getElementById('profile-chips');
+  const profileInput = document.getElementById('profile');
   const revisionList = document.getElementById('revision-list');
   const pipelineEl   = document.getElementById('pipeline');
 
-  function populateProfiles(profiles) {
-    profileList.innerHTML = '';
-    if (!profiles || profiles.length === 0) return;
-    profiles.forEach(name => {
-      const opt = document.createElement('option');
-      opt.value = name;
-      profileList.appendChild(opt);
-    });
-    profileHint.textContent = 'Available: ' + profiles.join(', ');
-    profileHint.style.display = '';
+  function _selectedProfiles() {
+    return profileInput.value.split(',').map(s => s.trim()).filter(Boolean);
   }
+
+  function _syncChips() {
+    const selected = new Set(_selectedProfiles());
+    profileChips.querySelectorAll('.profile-chip').forEach(chip => {
+      chip.classList.toggle('selected', selected.has(chip.dataset.name));
+    });
+  }
+
+  function populateProfiles(profiles) {
+    profileChips.innerHTML = '';
+    if (!profiles || profiles.length === 0) {
+      profileChips.style.display = 'none';
+      return;
+    }
+    profiles.forEach(name => {
+      const chip = document.createElement('span');
+      chip.className = 'profile-chip';
+      chip.dataset.name = name;
+      chip.textContent = name;
+      chip.addEventListener('click', () => {
+        const cur = _selectedProfiles();
+        const idx = cur.indexOf(name);
+        if (idx === -1) cur.push(name); else cur.splice(idx, 1);
+        profileInput.value = cur.join(',');
+        _syncChips();
+      });
+      profileChips.appendChild(chip);
+    });
+    profileChips.style.display = 'flex';
+    _syncChips();
+  }
+
+  // Keep chips in sync if the user edits the text input directly
+  profileInput.addEventListener('input', _syncChips);
 
   function populateRefs(refs) {
     revisionList.innerHTML = '';
