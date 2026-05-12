@@ -184,6 +184,17 @@
   .param-group { margin-bottom: 1.25rem; }
   .param-group > label { display:block; margin-bottom:0.2rem; font-weight:500; }
   .param-group .param-desc { font-size:0.8125rem; color:var(--muted); margin-top:0.2rem; }
+  .param-group details.param-help { margin-top:0.3rem; }
+  .param-group details.param-help summary { font-size:0.8rem; color:var(--accent); cursor:pointer; user-select:none; }
+  .param-group details.param-help summary:hover { text-decoration:underline; }
+  .param-group details.param-help .param-help-body {
+    font-size:0.8125rem; color:var(--muted); margin-top:0.35rem;
+    padding:0.5rem 0.75rem; background:var(--surface); border-left:3px solid var(--border);
+    border-radius:0 4px 4px 0; line-height:1.5;
+  }
+  .param-group details.param-help .param-help-body code {
+    font-size:0.78rem; background:var(--bg); padding:0.1em 0.3em; border-radius:3px;
+  }
   .param-required-star { color:var(--danger); margin-left:0.15rem; }
   .param-input-row { display:flex; gap:0.4rem; align-items:center; }
   .param-input-row input, .param-input-row select { flex:1; min-width:0; }
@@ -481,6 +492,18 @@
     return '';
   }
 
+  /* Minimal Markdown → HTML (bold, italic, inline code, links, line-breaks) */
+  function _mdToHtml(text) {
+    const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return esc(text)
+      .replace(/\*\*(.+?)\*\*/g,  '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g,      '<em>$1</em>')
+      .replace(/`([^`]+)`/g,      '<code>$1</code>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+               '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      .replace(/\n/g, '<br>');
+  }
+
   function buildField(p, isRequired) {
     const fmt    = guessFormat(p);
     const isFile = FILE_FORMATS.has(fmt);
@@ -578,6 +601,19 @@
       desc.className   = 'param-desc';
       desc.textContent = p.description;
       wrap.appendChild(desc);
+    }
+
+    if (p.help_text && p.help_text.trim()) {
+      const details = document.createElement('details');
+      details.className = 'param-help';
+      const summary = document.createElement('summary');
+      summary.textContent = 'ℹ More info';
+      const body = document.createElement('div');
+      body.className = 'param-help-body';
+      body.innerHTML = _mdToHtml(p.help_text.trim());
+      details.appendChild(summary);
+      details.appendChild(body);
+      wrap.appendChild(details);
     }
 
     return wrap;
