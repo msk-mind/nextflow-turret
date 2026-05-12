@@ -132,7 +132,7 @@
     <p style="font-size:16px;margin-bottom:8px;">No pipelines yet</p>
     <p><a href="/launch">Launch your first pipeline →</a></p>
     <p style="margin-top:12px;font-size:12px;">Or point Nextflow at this server with
-      <code style="font-family:var(--mono);color:var(--accent)">-with-tower http://&lt;host&gt;:8000</code>
+      <code style="font-family:var(--mono);color:var(--accent)">-with-tower {{ request.base_url }}</code>
     </p>
   </div>
   {% endif %}
