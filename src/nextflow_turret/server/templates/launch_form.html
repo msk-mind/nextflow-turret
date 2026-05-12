@@ -765,6 +765,8 @@
         : (existing.includes('/') ? existing.substring(0, existing.lastIndexOf('/')) || '/' : '');
       if (startPath) { loadDir(startPath); return; }
     }
+    const projDir = projectDirEl && projectDirEl.value.trim();
+    if (projDir) { loadDir(projDir); return; }
     loadRoots();
   }
 
