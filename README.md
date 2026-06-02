@@ -198,6 +198,11 @@ tower_process_to_slurm_name("MUSSEL:EXTRACT_FEATURES:TESSELLATE_FEATURIZE_BATCH"
 nextflow_turret/
 ├── state.py            # WorkflowRegistry, WorkflowState — core in-memory model
 ├── handlers.py         # TowerRouter — parses Tower HTTP payloads
+├── handler_mixin.py    # TowerHandlerMixin — stdlib BaseHTTPRequestHandler integration
+├── auth.py             # Authentication (none / basic / OIDC, configured via turret.toml)
+├── config.py           # Config loading (turret.toml / ~/.config/turret/config.toml / CLI)
+├── schema.py           # Fetch and parse nextflow_schema.json for pipeline param discovery
+├── utils.py            # Standalone helpers (e.g. tower_process_to_slurm_name)
 ├── db/
 │   └── store.py        # RunStore — SQLite persistence (runs + launches)
 ├── launcher/
@@ -227,7 +232,7 @@ cd nextflow-turret
 uv run pytest
 
 # Or sync into a venv and work interactively
-uv sync --extra server
+uv sync --extra dev --extra server
 source .venv/bin/activate
 pytest --tb=short -q
 ```
@@ -238,8 +243,9 @@ pytest --tb=short -q
 |------|-------|---------|
 | `tests/test_turret.py` | 39 | Core library (`WorkflowRegistry`, `WorkflowState`, `TowerRouter`) |
 | `tests/test_server.py` | 44 | Server layer (`RunStore`, `PersistentWorkflowRegistry`, all endpoints) |
-| `tests/test_integration.py` | 32 | Cross-layer: Tower→SQLite, restart recovery, concurrency, API/DB/UI consistency |
-| `tests/test_e2e.py` | 34 | Full scenarios: NF trace lifecycle, failed tasks, multi-run dashboard, launch UI journey, error paths |
+| `tests/test_auth.py` | 48 | Authentication (none / basic / OIDC, session management, config parsing) |
+| `tests/test_integration.py` | 24 | Cross-layer: Tower→SQLite, restart recovery, concurrency, API/DB/UI consistency |
+| `tests/test_e2e.py` | 42 | Full scenarios: NF trace lifecycle, failed tasks, multi-run dashboard, launch UI journey, error paths |
 
 ---
 
