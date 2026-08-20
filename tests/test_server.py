@@ -71,6 +71,30 @@ class TestRunStore:
         assert result["complete"] is True
         assert result["task_counts"]["succeeded"] == 5
 
+    def test_upsert_repairs_identity_fields(self, store):
+        base = {
+            "workflow_id": "wf-reused", "batch_id": "old-batch", "run_name": "old-run",
+            "complete": True, "task_counts": {"succeeded": 4},
+            "processes": [], "resources": {}, "failures": [],
+            "started_at": 1.0, "updated_at": 2.0,
+        }
+        store.upsert(base)
+        store.upsert({
+            **base,
+            "batch_id": "new-batch",
+            "run_name": "new-run",
+            "complete": False,
+            "task_counts": {},
+            "started_at": 3.0,
+            "updated_at": 4.0,
+        })
+
+        result = store.get("wf-reused")
+
+        assert result["batch_id"] == "new-batch"
+        assert result["run_name"] == "new-run"
+        assert result["started_at"] == 3.0
+
     def test_get_missing_returns_none(self, store):
         assert store.get("nonexistent") is None
 
@@ -137,7 +161,8 @@ class TestTowerEndpoints:
     def test_trace_create(self, client):
         r = client.post("/trace/create", json={"runName": "dispatcher_mybatch"})
         assert r.status_code == 200
-        assert r.json()["workflowId"] == "dispatcher_mybatch"
+        assert r.json()["workflowId"] == workflow_id_for_batch("mybatch")
+        assert len(r.json()["workflowId"]) <= 16
 
     def test_trace_create_empty_body(self, client):
         r = client.post("/trace/create", json={})
@@ -411,4 +436,3 @@ class TestWebUI:
         r = client.get("/launches")
         assert r.status_code == 200
         assert b"org/listed" in r.content
-

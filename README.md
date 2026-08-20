@@ -83,7 +83,7 @@ Interactive docs are available at **`/docs`** when the server is running.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET`  | `/user-info` | Auth check on Nextflow startup |
-| `POST` | `/trace/create` | Workflow registered → returns `{workflowId}` |
+| `POST` | `/trace/create` | Workflow registered → returns a top-level `{workflowId, watchUrl, message, metadata}` response |
 | `PUT`  | `/trace/{id}/begin` | Workflow running |
 | `PUT`  | `/trace/{id}/progress` | Periodic task counts + per-task list |
 | `PUT`  | `/trace/{id}/heartbeat` | Keepalive (same payload as progress) |
@@ -127,15 +127,26 @@ curl -X POST http://localhost:8000/api/launches \
 Nextflow is launched with `-name dispatcher_{batch_id}`.  The `dispatcher_` prefix
 is stripped automatically to produce the *batch_id* that identifies the run.
 
+Tower workflow IDs are limited to 16 characters. Turret keeps the historical
+`dispatcher_` ID for short batch IDs and uses a deterministic opaque ID for longer
+ones, so restarting or retrying a run does not create a different workflow ID.
+Embedding applications can provide `workflow_id_factory` for a custom namespace;
+custom factories should also return IDs no longer than 16 characters.
+
 To use a different prefix, create your own `TowerRouter`:
 
 ```python
+import uuid
+
 from nextflow_turret import TowerRouter, WorkflowRegistry
 
 registry = WorkflowRegistry()
 router   = TowerRouter(
     registry=registry,
     run_name_to_batch_id=lambda name: name.removeprefix("mypipeline_"),
+    workflow_id_factory=lambda batch_id: (
+        f"myapp-{uuid.uuid5(uuid.NAMESPACE_URL, batch_id).hex[:10]}"
+    ),
 )
 ```
 

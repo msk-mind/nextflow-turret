@@ -5,7 +5,12 @@ import time
 import pytest
 
 import nextflow_turret as nt
-from nextflow_turret.state import WorkflowRegistry, WorkflowState, workflow_id_for_batch
+from nextflow_turret.state import (
+    WorkflowRegistry,
+    WorkflowState,
+    normalize_workflow_state,
+    workflow_id_for_batch,
+)
 from nextflow_turret.handlers import TowerRouter, user_info_response, trace_create_response
 from nextflow_turret.utils import tower_process_to_slurm_name
 
@@ -51,6 +56,21 @@ class TestWorkflowRegistry:
         state = registry.get_by_batch("abc")
         assert state is not None
         assert state["workflow_id"] == "custom_wid"
+
+    def test_get_by_batch_prefers_latest_duplicate(self, registry):
+        registry.register("old-id", "same-batch", "old")
+        registry.register("new-id", "same-batch", "new")
+        registry._workflows["old-id"].updated_at = 10.0
+        registry._workflows["new-id"].updated_at = 20.0
+
+        state = registry.get_by_batch("same-batch")
+
+        assert state["workflow_id"] == "new-id"
+
+    def test_get_by_batch_does_not_trust_workflow_id_alias(self, registry):
+        registry.register(workflow_id_for_batch("real-batch"), "other-batch", "run")
+
+        assert registry.get_by_batch("real-batch") is None
 
     def test_get_by_batch_missing(self, registry):
         assert registry.get_by_batch("nonexistent") is None
@@ -185,6 +205,36 @@ class TestTowerRouterPost:
         assert body["workflowId"] == "dispatcher_bat1"
         assert registry.is_registered("dispatcher_bat1")
 
+    def test_trace_create_uses_custom_workflow_id_factory(self):
+        reg = WorkflowRegistry()
+        router = TowerRouter(
+            registry=reg,
+            workflow_id_factory=lambda batch_id: f"custom-{batch_id[:8]}",
+        )
+
+        status, body = router.handle_post(
+            "/trace/create", {"runName": "dispatcher_custom-batch"}
+        )
+
+        assert status == 200
+        assert body["workflowId"] == "custom-custom-b"
+        assert reg.is_registered("custom-custom-b")
+
+    def test_trace_create_rejects_custom_workflow_id_over_limit(self):
+        reg = WorkflowRegistry()
+        router = TowerRouter(
+            registry=reg,
+            workflow_id_factory=lambda batch_id: "x" * 17,
+        )
+
+        status, body = router.handle_post(
+            "/trace/create", {"runName": "dispatcher_batch"}
+        )
+
+        assert status == 400
+        assert "16 characters" in body["error"]
+        assert reg.get_all() == []
+
     def test_trace_create_no_prefix(self, router, registry):
         status, body = router.handle_post("/trace/create", {"runName": "mypipe_run"})
         assert status == 200
@@ -295,6 +345,8 @@ class TestResponseFactories:
         r = trace_create_response("wf-abc")
         assert r["workflowId"] == "wf-abc"
         assert "watchUrl" in r
+        assert r["message"] is None
+        assert r["metadata"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -342,4 +394,39 @@ class TestTowerProcessToSlurmName:
 # ---------------------------------------------------------------------------
 
 def test_workflow_id_for_batch():
-    assert workflow_id_for_batch("abc123") == "dispatcher_abc123"
+    assert workflow_id_for_batch("abc12") == "dispatcher_abc12"
+
+
+def test_workflow_id_for_long_batch_is_bounded_and_deterministic():
+    batch_id = "20260523T041220_4c59c6c7"
+
+    workflow_id = workflow_id_for_batch(batch_id)
+
+    assert len(workflow_id) == 16
+    assert workflow_id.startswith("r")
+    assert workflow_id == workflow_id_for_batch(batch_id)
+    assert workflow_id != workflow_id_for_batch(batch_id + "-other")
+
+
+def test_workflow_id_for_batch_rejects_empty_value():
+    with pytest.raises(ValueError):
+        workflow_id_for_batch("")
+
+
+def test_normalize_workflow_state_is_non_mutating_and_derives_progress():
+    persisted = {
+        "complete": False,
+        "updated_at": 100.0,
+        "task_counts": {"succeeded": "2", "cached": 1, "failed": "bad", "running": 2},
+        "processes": [{"name": "PROC", "running": "2"}],
+        "failures": [{"taskId": 1}],
+    }
+
+    state = normalize_workflow_state(persisted, now=401.0)
+
+    assert state["done"] == 3
+    assert state["total"] == 5
+    assert state["pct"] == 60
+    assert state["stalled"] is True
+    assert state["task_counts"]["failed"] == 0
+    assert persisted["task_counts"]["succeeded"] == "2"
