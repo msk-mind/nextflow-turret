@@ -37,22 +37,31 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Optional
+import uuid
+from typing import Mapping, Optional
 
 
 _MAX_AGE_SECONDS = 3600   # evict completed workflows older than this
 _STALE_SECONDS   = 5 * 60 # mark workflow stalled if no update in this window
 
 
-def _task_counts_from_progress(p: dict) -> dict:
+def _task_counts_from_progress(p: Mapping) -> dict:
+    if not isinstance(p, Mapping):
+        p = {}
+    def _count(name: str) -> int:
+        try:
+            return max(0, int(p.get(name, 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
     return {
-        "succeeded": p.get("succeeded", 0),
-        "failed":    p.get("failed",    0),
-        "cached":    p.get("cached",    0),
-        "running":   p.get("running",   0),
-        "pending":   p.get("pending",   0),
-        "submitted": p.get("submitted", 0),
-        "aborted":   p.get("aborted",   0),
+        "succeeded": _count("succeeded"),
+        "failed":    _count("failed"),
+        "cached":    _count("cached"),
+        "running":   _count("running"),
+        "pending":   _count("pending"),
+        "submitted": _count("submitted"),
+        "aborted":   _count("aborted"),
     }
 
 
@@ -108,12 +117,7 @@ class WorkflowState:
         return not self.complete and (time.time() - self.updated_at) > stale_seconds
 
     def as_dict(self) -> dict:
-        done  = self.task_counts.get("succeeded", 0) + self.task_counts.get("cached", 0)
-        total = done + sum(
-            self.task_counts.get(k, 0)
-            for k in ("failed", "running", "pending", "submitted")
-        )
-        return {
+        return normalize_workflow_state({
             "workflow_id":  self.workflow_id,
             "batch_id":     self.batch_id,
             "run_name":     self.run_name,
@@ -122,13 +126,9 @@ class WorkflowState:
             "resources":    self.resources,
             "failures":     self.failures,
             "complete":     self.complete,
-            "stalled":      self.is_stalled(),
-            "done":         done,
-            "total":        total,
-            "pct":          round(done / total * 100) if total else 0,
             "started_at":   self.started_at,
             "updated_at":   self.updated_at,
-        }
+        })
 
 
 class WorkflowRegistry:
@@ -214,14 +214,10 @@ class WorkflowRegistry:
     # ------------------------------------------------------------------
 
     def _by_batch_id_locked(self, batch_id: str) -> Optional[WorkflowState]:
-        canonical = workflow_id_for_batch(batch_id)
-        state = self._workflows.get(canonical)
-        if state:
-            return state
-        for s in self._workflows.values():
-            if s.batch_id == batch_id:
-                return s
-        return None
+        matches = [s for s in self._workflows.values() if s.batch_id == batch_id]
+        if not matches:
+            return None
+        return max(matches, key=lambda state: state.updated_at)
 
 
 # ---------------------------------------------------------------------------
@@ -229,8 +225,19 @@ class WorkflowRegistry:
 # ---------------------------------------------------------------------------
 
 def workflow_id_for_batch(batch_id: str) -> str:
-    """Return the canonical Tower workflow ID for a dispatcher *batch_id*."""
-    return f"dispatcher_{batch_id}"
+    """Return a deterministic nf-tower-compatible ID for *batch_id*.
+
+    nf-tower limits workflow IDs to 16 characters. Keep the historical
+    ``dispatcher_`` form where it fits so existing short IDs remain stable;
+    long IDs use a deterministic opaque 16-character value instead.
+    """
+    if not isinstance(batch_id, str) or not batch_id:
+        raise ValueError("batch_id must be a non-empty string")
+    legacy = f"dispatcher_{batch_id}"
+    if len(legacy) <= 16:
+        return legacy
+    digest = uuid.uuid5(uuid.NAMESPACE_URL, f"nextflow-turret:{batch_id}").hex[:15]
+    return f"r{digest}"
 
 
 # ---------------------------------------------------------------------------
@@ -275,3 +282,52 @@ def get_all_states() -> list[dict]:
 
 def evict_old(max_age_seconds: float = _MAX_AGE_SECONDS) -> int:
     return default_registry.evict_old(max_age_seconds)
+
+
+def normalize_workflow_state(
+    row: Mapping,
+    *,
+    now: float | None = None,
+    stale_seconds: float = _STALE_SECONDS,
+) -> dict:
+    """Return a normalized, derived-field-enriched copy of a persisted state.
+
+    This is useful when a consumer reads :class:`RunStore` rows directly
+    instead of through :class:`PersistentWorkflowRegistry`.
+    """
+    raw_counts = row.get("task_counts") or {}
+    if not isinstance(raw_counts, Mapping):
+        raw_counts = {}
+    counts = _task_counts_from_progress(raw_counts)
+
+    def _copy_items(value) -> list[dict]:
+        result = []
+        for item in value or []:
+            try:
+                result.append(dict(item))
+            except (TypeError, ValueError):
+                continue
+        return result
+
+    state = dict(row)
+    state["task_counts"] = counts
+    state["processes"] = _copy_items(row.get("processes"))
+    state["failures"] = _copy_items(row.get("failures"))
+    state["complete"] = bool(row.get("complete"))
+    done = counts["succeeded"] + counts["cached"]
+    total = done + sum(
+        counts[key] for key in ("failed", "running", "pending", "submitted")
+    )
+    state["done"] = done
+    state["total"] = total
+    state["pct"] = round(done / total * 100) if total else 0
+    if "stalled" not in state:
+        current_time = time.time() if now is None else now
+        try:
+            updated_at = float(state.get("updated_at") or 0.0)
+        except (TypeError, ValueError):
+            updated_at = 0.0
+        state["stalled"] = (
+            not state["complete"] and current_time - updated_at > stale_seconds
+        )
+    return state

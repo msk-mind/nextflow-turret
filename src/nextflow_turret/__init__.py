@@ -34,6 +34,7 @@ from .state import (
     WorkflowRegistry,
     default_registry,
     workflow_id_for_batch,
+    normalize_workflow_state,
     register_workflow,
     is_registered,
     update_progress,
@@ -70,6 +71,7 @@ __all__ = [
     "WorkflowRegistry",
     "default_registry",
     "workflow_id_for_batch",
+    "normalize_workflow_state",
     # Convenience singletons
     "register_workflow",
     "is_registered",

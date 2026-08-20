@@ -34,6 +34,9 @@ Pass a *run_name_to_batch_id* callable to :class:`TowerRouter`:
         return run_name.removeprefix("mypipeline_")
 
     router = TowerRouter(registry=reg, run_name_to_batch_id=my_extractor)
+
+The workflow-ID policy can also be replaced with *workflow_id_factory* when
+an embedding application has its own stable ID namespace.
 """
 from __future__ import annotations
 
@@ -66,7 +69,12 @@ def user_info_response() -> dict:
 
 def trace_create_response(workflow_id: str) -> dict:
     """Payload for ``POST /trace/create`` — tells NF its assigned workflow ID."""
-    return {"workflowId": workflow_id, "watchUrl": None}
+    return {
+        "workflowId": workflow_id,
+        "watchUrl": None,
+        "message": None,
+        "metadata": None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -92,17 +100,25 @@ class TowerRouter:
     run_name_to_batch_id:
         Callable that converts a NF run name string to a *batch_id*.
         Defaults to stripping the ``dispatcher_`` prefix.
+    workflow_id_factory:
+        Callable that converts a *batch_id* to the workflow ID returned to
+        Nextflow. Defaults to :func:`workflow_id_for_batch`.
     """
 
     def __init__(
         self,
         registry: Optional[WorkflowRegistry] = None,
         run_name_to_batch_id: Optional[Callable[[str], str]] = None,
+        workflow_id_factory: Optional[Callable[[str], str]] = None,
     ) -> None:
         self._reg = registry if registry is not None else default_registry
         self._extract_batch_id: Callable[[str], str] = (
             run_name_to_batch_id if run_name_to_batch_id is not None
             else _default_run_name_to_batch_id
+        )
+        self._workflow_id_factory: Callable[[str], str] = (
+            workflow_id_factory if workflow_id_factory is not None
+            else workflow_id_for_batch
         )
 
     # ------------------------------------------------------------------
@@ -129,7 +145,7 @@ class TowerRouter:
         if p == "/trace/create":
             run_name    = body.get("runName") or ""
             batch_id    = self._extract_batch_id(run_name) if run_name else str(uuid.uuid4())
-            workflow_id = workflow_id_for_batch(batch_id)
+            workflow_id = self._workflow_id_factory(batch_id)
             self._reg.register(workflow_id, batch_id, run_name or workflow_id)
             return 200, trace_create_response(workflow_id)
         return None

@@ -67,11 +67,14 @@ INSERT INTO runs
      started_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(workflow_id) DO UPDATE SET
+    batch_id    = excluded.batch_id,
+    run_name    = excluded.run_name,
     complete    = excluded.complete,
     task_counts = excluded.task_counts,
     processes   = excluded.processes,
     resources   = excluded.resources,
     failures    = excluded.failures,
+    started_at  = excluded.started_at,
     updated_at  = excluded.updated_at
 """
 

@@ -447,7 +447,7 @@ def create_app(
     app = FastAPI(
         title="Nextflow Turret",
         description="Self-hosted Nextflow Tower / Seqera Platform replacement",
-        version="0.1.0",
+        version="0.2.0",
     )
 
     # ------------------------------------------------------------------ #
@@ -1169,4 +1169,3 @@ def create_app(
         return user
 
     return app
-
