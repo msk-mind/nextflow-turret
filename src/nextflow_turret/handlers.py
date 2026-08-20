@@ -47,6 +47,9 @@ from typing import Callable, Optional
 from .state import WorkflowRegistry, default_registry, workflow_id_for_batch
 
 
+_MAX_WORKFLOW_ID_LENGTH = 16
+
+
 # ---------------------------------------------------------------------------
 # Standalone response factories (no registry needed)
 # ---------------------------------------------------------------------------
@@ -146,6 +149,15 @@ class TowerRouter:
             run_name    = body.get("runName") or ""
             batch_id    = self._extract_batch_id(run_name) if run_name else str(uuid.uuid4())
             workflow_id = self._workflow_id_factory(batch_id)
+            if not isinstance(workflow_id, str) or not workflow_id:
+                return 400, {"error": "workflow_id_factory must return a non-empty string"}
+            if len(workflow_id) > _MAX_WORKFLOW_ID_LENGTH:
+                return 400, {
+                    "error": (
+                        "workflow_id_factory must return an ID no longer than "
+                        f"{_MAX_WORKFLOW_ID_LENGTH} characters"
+                    )
+                }
             self._reg.register(workflow_id, batch_id, run_name or workflow_id)
             return 200, trace_create_response(workflow_id)
         return None

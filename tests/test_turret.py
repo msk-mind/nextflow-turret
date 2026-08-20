@@ -209,7 +209,7 @@ class TestTowerRouterPost:
         reg = WorkflowRegistry()
         router = TowerRouter(
             registry=reg,
-            workflow_id_factory=lambda batch_id: f"custom-{batch_id}",
+            workflow_id_factory=lambda batch_id: f"custom-{batch_id[:8]}",
         )
 
         status, body = router.handle_post(
@@ -217,8 +217,23 @@ class TestTowerRouterPost:
         )
 
         assert status == 200
-        assert body["workflowId"] == "custom-custom-batch"
-        assert reg.is_registered("custom-custom-batch")
+        assert body["workflowId"] == "custom-custom-b"
+        assert reg.is_registered("custom-custom-b")
+
+    def test_trace_create_rejects_custom_workflow_id_over_limit(self):
+        reg = WorkflowRegistry()
+        router = TowerRouter(
+            registry=reg,
+            workflow_id_factory=lambda batch_id: "x" * 17,
+        )
+
+        status, body = router.handle_post(
+            "/trace/create", {"runName": "dispatcher_batch"}
+        )
+
+        assert status == 400
+        assert "16 characters" in body["error"]
+        assert reg.get_all() == []
 
     def test_trace_create_no_prefix(self, router, registry):
         status, body = router.handle_post("/trace/create", {"runName": "mypipe_run"})

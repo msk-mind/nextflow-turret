@@ -136,13 +136,17 @@ custom factories should also return IDs no longer than 16 characters.
 To use a different prefix, create your own `TowerRouter`:
 
 ```python
+import uuid
+
 from nextflow_turret import TowerRouter, WorkflowRegistry
 
 registry = WorkflowRegistry()
 router   = TowerRouter(
     registry=registry,
     run_name_to_batch_id=lambda name: name.removeprefix("mypipeline_"),
-    workflow_id_factory=lambda batch_id: f"myapp-{batch_id}",
+    workflow_id_factory=lambda batch_id: (
+        f"myapp-{uuid.uuid5(uuid.NAMESPACE_URL, batch_id).hex[:10]}"
+    ),
 )
 ```
 

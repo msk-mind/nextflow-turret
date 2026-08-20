@@ -535,7 +535,7 @@ wheels = [
 
 [[package]]
 name = "nextflow-turret"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "bcrypt" },
@@ -548,15 +548,13 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-oidc = [
-    { name = "authlib" },
-    { name = "httpx" },
-]
-
-[package.dev-dependencies]
 dev = [
     { name = "httpx" },
     { name = "pytest" },
+]
+oidc = [
+    { name = "authlib" },
+    { name = "httpx" },
 ]
 
 [package.metadata]
@@ -564,21 +562,16 @@ requires-dist = [
     { name = "authlib", marker = "extra == 'oidc'", specifier = ">=1.0" },
     { name = "bcrypt", specifier = ">=4.0" },
     { name = "fastapi", specifier = ">=0.111" },
+    { name = "httpx", marker = "extra == 'dev'" },
     { name = "httpx", marker = "extra == 'oidc'", specifier = ">=0.24" },
-    { name = "itsdangerous", specifier = ">=2.0" },
     { name = "itsdangerous", specifier = ">=2.2.0" },
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "pytest", marker = "extra == 'dev'" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]
-provides-extras = ["oidc"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-]
+provides-extras = ["oidc", "dev"]
 
 [[package]]
 name = "packaging"
