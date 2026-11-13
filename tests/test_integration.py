@@ -38,7 +38,9 @@ class TestTowerTracePersistence:
         assert row is not None
         assert row["batch_id"] == "p1"
         assert row["complete"] is False
-        assert row["task_counts"] == {}
+        # Task counts are normalized: every count is present, all zero before progress arrives.
+        assert row["task_counts"]
+        assert set(row["task_counts"].values()) == {0}
 
     def test_progress_update_reflected_in_db(self, db_path, log_dir):
         client = TestClient(create_app(db_path=db_path, log_dir=log_dir))
