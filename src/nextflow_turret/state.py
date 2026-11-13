@@ -62,6 +62,10 @@ def _task_counts_from_progress(p: Mapping) -> dict:
         "pending":   _count("pending"),
         "submitted": _count("submitted"),
         "aborted":   _count("aborted"),
+        # Nextflow also counts each failed task with errorAction IGNORE (or RETRY)
+        # in `ignored` (or `retries`); `failed` includes them.
+        "ignored":   _count("ignored"),
+        "retries":   _count("retries"),
     }
 
 
@@ -107,6 +111,7 @@ class WorkflowState:
                         "name":    t.get("name", ""),
                         "tag":     t.get("tag"),
                         "exit":    t.get("exit"),
+                        "errorAction": t.get("errorAction"),
                         "hash":    t.get("hash"),
                     })
             if len(self.failures) > 50:
@@ -284,6 +289,20 @@ def evict_old(max_age_seconds: float = _MAX_AGE_SECONDS) -> int:
     return default_registry.evict_old(max_age_seconds)
 
 
+_PROCESS_INT_FIELDS = (
+    "pending", "submitted", "running", "succeeded", "cached", "failed", "aborted",
+    "stored", "ignored", "retries", "loadCpus", "loadMemory", "peakRunning",
+    "peakCpus", "peakMemory",
+)
+
+
+def _nonnegative_int(value) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def normalize_workflow_state(
     row: Mapping,
     *,
@@ -309,10 +328,23 @@ def normalize_workflow_state(
                 continue
         return result
 
+    processes = []
+    for process in _copy_items(row.get("processes")):
+        for key in _PROCESS_INT_FIELDS:
+            if key in process:
+                process[key] = _nonnegative_int(process[key])
+        process["failedNotIgnored"] = max(
+            0, process.get("failed", 0) - process.get("ignored", 0)
+        )
+        processes.append(process)
+
     state = dict(row)
     state["task_counts"] = counts
-    state["processes"] = _copy_items(row.get("processes"))
+    state["processes"] = processes
     state["failures"] = _copy_items(row.get("failures"))
+    # Failures that count against the run: Nextflow's `failed` includes tasks
+    # whose errorAction was IGNORE, which it also counts in `ignored`.
+    state["failed_not_ignored"] = max(0, counts["failed"] - counts["ignored"])
     state["complete"] = bool(row.get("complete"))
     done = counts["succeeded"] + counts["cached"]
     total = done + sum(
