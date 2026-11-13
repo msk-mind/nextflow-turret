@@ -284,6 +284,21 @@ def evict_old(max_age_seconds: float = _MAX_AGE_SECONDS) -> int:
     return default_registry.evict_old(max_age_seconds)
 
 
+_IGNORED_EXIT_STATUS = 2147483647  # Nextflow's exit status for an ignored task failure
+_PROCESS_INT_FIELDS = (
+    "pending", "submitted", "running", "succeeded", "cached", "failed", "aborted",
+    "stored", "ignored", "retries", "loadCpus", "loadMemory", "peakRunning",
+    "peakCpus", "peakMemory",
+)
+
+
+def _nonnegative_int(value) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def normalize_workflow_state(
     row: Mapping,
     *,
@@ -309,10 +324,36 @@ def normalize_workflow_state(
                 continue
         return result
 
+    # Tasks failing under errorStrategy 'ignore' are reported with an exit
+    # status of Integer.MAX_VALUE; they are not failures of the run.
+    failures = []
+    ignored_by_process: dict[str, int] = {}
+    for failure in _copy_items(row.get("failures")):
+        try:
+            exit_code = int(failure.get("exit"))
+        except (TypeError, ValueError):
+            exit_code = None
+        if exit_code == _IGNORED_EXIT_STATUS:
+            name = str(failure.get("process") or "")
+            ignored_by_process[name] = ignored_by_process.get(name, 0) + 1
+            continue
+        failures.append(failure)
+    counts["failed"] = max(0, counts["failed"] - sum(ignored_by_process.values()))
+
+    processes = []
+    for process in _copy_items(row.get("processes")):
+        for key in _PROCESS_INT_FIELDS:
+            if key in process:
+                process[key] = _nonnegative_int(process[key])
+        ignored = ignored_by_process.get(str(process.get("name") or process.get("process") or ""), 0)
+        if ignored:
+            process["failed"] = max(0, process.get("failed", 0) - ignored)
+        processes.append(process)
+
     state = dict(row)
     state["task_counts"] = counts
-    state["processes"] = _copy_items(row.get("processes"))
-    state["failures"] = _copy_items(row.get("failures"))
+    state["processes"] = processes
+    state["failures"] = failures
     state["complete"] = bool(row.get("complete"))
     done = counts["succeeded"] + counts["cached"]
     total = done + sum(

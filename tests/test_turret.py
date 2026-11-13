@@ -430,3 +430,45 @@ def test_normalize_workflow_state_is_non_mutating_and_derives_progress():
     assert state["stalled"] is True
     assert state["task_counts"]["failed"] == 0
     assert persisted["task_counts"]["succeeded"] == "2"
+
+
+def test_normalize_drops_failures_ignored_by_error_strategy():
+    """Nextflow reports a task failed under errorStrategy 'ignore' with exit Integer.MAX_VALUE."""
+    persisted = {
+        "complete": False,
+        "updated_at": 400.0,
+        "task_counts": {"succeeded": 5, "failed": 3},
+        "processes": [
+            {"name": "A", "failed": 2, "succeeded": 3},
+            {"name": "B", "failed": 1, "succeeded": 2},
+        ],
+        "failures": [
+            {"process": "A", "exit": 2147483647},
+            {"process": "A", "exit": 1},
+            {"process": "B", "exit": 2147483647},
+        ],
+    }
+
+    state = normalize_workflow_state(persisted, now=401.0)
+
+    assert state["failures"] == [{"process": "A", "exit": 1}]
+    assert state["task_counts"]["failed"] == 1
+    assert {p["name"]: p["failed"] for p in state["processes"]} == {"A": 1, "B": 0}
+    assert persisted["failures"][0]["exit"] == 2147483647  # input not mutated
+
+
+def test_normalize_coerces_process_counters():
+    persisted = {
+        "complete": True,
+        "updated_at": 400.0,
+        "task_counts": {"succeeded": 1},
+        "processes": [{"name": "A", "succeeded": "4", "failed": -2, "peakMemory": "1024", "loadCpus": None}],
+        "failures": [],
+    }
+
+    process = normalize_workflow_state(persisted, now=401.0)["processes"][0]
+
+    assert process["succeeded"] == 4
+    assert process["failed"] == 0
+    assert process["peakMemory"] == 1024
+    assert process["loadCpus"] == 0
