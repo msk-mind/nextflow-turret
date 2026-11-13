@@ -62,6 +62,10 @@ def _task_counts_from_progress(p: Mapping) -> dict:
         "pending":   _count("pending"),
         "submitted": _count("submitted"),
         "aborted":   _count("aborted"),
+        # Nextflow also counts each failed task with errorAction IGNORE (or RETRY)
+        # in `ignored` (or `retries`); `failed` includes them.
+        "ignored":   _count("ignored"),
+        "retries":   _count("retries"),
     }
 
 
@@ -107,6 +111,7 @@ class WorkflowState:
                         "name":    t.get("name", ""),
                         "tag":     t.get("tag"),
                         "exit":    t.get("exit"),
+                        "errorAction": t.get("errorAction"),
                         "hash":    t.get("hash"),
                     })
             if len(self.failures) > 50:
@@ -284,7 +289,6 @@ def evict_old(max_age_seconds: float = _MAX_AGE_SECONDS) -> int:
     return default_registry.evict_old(max_age_seconds)
 
 
-_IGNORED_EXIT_STATUS = 2147483647  # Nextflow's exit status for an ignored task failure
 _PROCESS_INT_FIELDS = (
     "pending", "submitted", "running", "succeeded", "cached", "failed", "aborted",
     "stored", "ignored", "retries", "loadCpus", "loadMemory", "peakRunning",
@@ -324,36 +328,23 @@ def normalize_workflow_state(
                 continue
         return result
 
-    # Tasks failing under errorStrategy 'ignore' are reported with an exit
-    # status of Integer.MAX_VALUE; they are not failures of the run.
-    failures = []
-    ignored_by_process: dict[str, int] = {}
-    for failure in _copy_items(row.get("failures")):
-        try:
-            exit_code = int(failure.get("exit"))
-        except (TypeError, ValueError):
-            exit_code = None
-        if exit_code == _IGNORED_EXIT_STATUS:
-            name = str(failure.get("process") or "")
-            ignored_by_process[name] = ignored_by_process.get(name, 0) + 1
-            continue
-        failures.append(failure)
-    counts["failed"] = max(0, counts["failed"] - sum(ignored_by_process.values()))
-
     processes = []
     for process in _copy_items(row.get("processes")):
         for key in _PROCESS_INT_FIELDS:
             if key in process:
                 process[key] = _nonnegative_int(process[key])
-        ignored = ignored_by_process.get(str(process.get("name") or process.get("process") or ""), 0)
-        if ignored:
-            process["failed"] = max(0, process.get("failed", 0) - ignored)
+        process["failedNotIgnored"] = max(
+            0, process.get("failed", 0) - process.get("ignored", 0)
+        )
         processes.append(process)
 
     state = dict(row)
     state["task_counts"] = counts
     state["processes"] = processes
-    state["failures"] = failures
+    state["failures"] = _copy_items(row.get("failures"))
+    # Failures that count against the run: Nextflow's `failed` includes tasks
+    # whose errorAction was IGNORE, which it also counts in `ignored`.
+    state["failed_not_ignored"] = max(0, counts["failed"] - counts["ignored"])
     state["complete"] = bool(row.get("complete"))
     done = counts["succeeded"] + counts["cached"]
     total = done + sum(
