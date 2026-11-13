@@ -85,8 +85,17 @@ turret-proxy --upstream http://localhost:8000 --port 8001   # or: python -m next
 nextflow run main.nf -with-tower http://localhost:8001
 ```
 
-Events sent while turret is unreachable are dropped; the next progress update
-restores the run's state.
+While turret is unreachable (connection refused, timeout, or a 502/503/504 from a
+reverse proxy in front of it), the proxy answers Nextflow itself. For
+`POST /trace/create` it returns the same deterministic `workflowId` turret would
+assign, so a run started during a restart still gets a valid ID and its later
+events reach the right run. Other events sent while turret is down are dropped;
+the next progress update restores the run's state. `--upstream` takes an
+`http://` or `https://` URL and keeps any path prefix (e.g.
+`https://gateway/turret`). Outages are logged once when they start and end.
+
+If you embed turret with a custom `run_name_to_batch_id`, the proxy's fallback
+IDs follow the default `dispatcher_` mapping and may not match yours.
 
 ## REST API
 

@@ -85,3 +85,71 @@ def test_answers_ok_when_the_upstream_is_down():
     finally:
         proxy.shutdown()
         proxy.server_close()
+
+
+def test_create_while_upstream_down_returns_turrets_workflow_id():
+    """Nextflow aborts a run whose /trace/create reply has no workflowId."""
+    from nextflow_turret.state import workflow_id_for_batch
+
+    dead = f"http://localhost:{_free_port()}"
+    proxy = _serve(make_server(dead, host="localhost", port=_free_port()))
+    try:
+        base = f"http://localhost:{proxy.server_address[1]}"
+        status, body = _request(f"{base}/trace/create", "POST", {"runName": "dispatcher_b42"})
+        assert status == 200
+        # The same ID turret assigns, so events after turret is back reach the right run.
+        assert body["workflowId"] == workflow_id_for_batch("b42")
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+
+
+@pytest.fixture()
+def unavailable_upstream():
+    """An ingress answering 503 while turret restarts."""
+    class Unavailable(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def _reply(self):
+            length = int(self.headers.get("Content-Length", 0))
+            if length:
+                self.rfile.read(length)
+            self.send_response(503)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        do_GET = do_POST = do_PUT = do_DELETE = _reply
+
+    server = _serve(HTTPServer(("localhost", _free_port()), Unavailable))
+    yield f"http://localhost:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+def test_gateway_errors_count_as_upstream_down(unavailable_upstream):
+    proxy = _serve(make_server(unavailable_upstream, host="localhost", port=_free_port()))
+    try:
+        base = f"http://localhost:{proxy.server_address[1]}"
+        assert _request(f"{base}/trace/abc/progress", "PUT", {"progress": {}}) == (200, {})
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+
+
+def test_upstream_path_prefix_is_kept(upstream):
+    upstream_url, seen = upstream
+    proxy = _serve(make_server(upstream_url + "/turret", host="localhost", port=_free_port()))
+    try:
+        base = f"http://localhost:{proxy.server_address[1]}"
+        _request(f"{base}/trace/create", "POST", {"runName": "r1"})
+        assert seen[0][1] == "/turret/trace/create"
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+
+
+@pytest.mark.parametrize("bad", ["localhost:8000", "ftp://host", ""])
+def test_upstream_needs_an_http_url(bad):
+    with pytest.raises(ValueError, match="upstream"):
+        make_server(bad, host="localhost", port=_free_port())
