@@ -50,6 +50,7 @@ dev = [
 
 [project.scripts]
 turret = "nextflow_turret.server.__main__:main"
+turret-proxy = "nextflow_turret.proxy.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
